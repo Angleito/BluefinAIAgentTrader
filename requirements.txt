@@ -1,0 +1,15 @@
+browser-use
+langchain
+python-dotenv = 0.19.0
+playwright
+black~=22.3.0
+bumpversion
+click
+flake8>=2.2.3
+ipython
+pytest-cov
+pytest>=3.9
+sh>=2
+tox
+twine
+wheel
