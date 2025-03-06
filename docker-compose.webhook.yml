@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  webhook:
+    build: .
+    volumes:
+      - ./:/app
+      - ./logs:/app/logs
+      - ./alerts:/app/alerts
+      - ./.env:/app/.env
+    environment:
+      - WEBHOOK_PORT=5001
+      - TV_WEBHOOK_SECRET=${TV_WEBHOOK_SECRET:-tradingview_secret}
+      - FLASK_ENV=production
+    command: python webhook_server.py
+    restart: unless-stopped
+    ports:
+      - "5001:5001"
+
+  ngrok:
+    image: ngrok/ngrok:alpine
+    environment:
+      - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN}
+    ports:
+      - "4040:4040"
+    depends_on:
+      - webhook
+    command: http --domain=${NGROK_DOMAIN:-} webhook:5001
+    restart: unless-stopped 

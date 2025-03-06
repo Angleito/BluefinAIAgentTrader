@@ -1,6 +1,105 @@
-# Perplexity Trader
+# Trading Agent with AI Analysis
 
-An AI-powered trading agent for the Bluefin Exchange, leveraging TradingView charts and AI analysis.
+A comprehensive trading agent that uses Claude 3.7 Sonnet (with Perplexity as fallback) to analyze TradingView charts and execute trades on the Bluefin Exchange.
+
+## Features
+
+- Chart analysis using Claude 3.7 Sonnet and Perplexity AI
+- TradingView webhook integration for automated trade signals
+- Bluefin Exchange API integration for real trading
+- Docker deployment for 24/7 autonomous operation
+- Public webhook endpoint via ngrok
+
+## Prerequisites
+
+- Docker and Docker Compose
+- Bluefin Exchange account with API keys
+- Anthropic API key (for Claude)
+- Perplexity API key
+- ngrok account with authtoken
+
+## Setup
+
+### 1. Configure Environment Variables
+
+Create a `.env` file with the following variables:
+
+```
+# Bluefin API Keys
+BLUEFIN_PRIVATE_KEY=your_private_key_here
+BLUEFIN_NETWORK=MAINNET
+
+# AI API Keys
+ANTHROPIC_API_KEY=your_anthropic_api_key_here
+PERPLEXITY_API_KEY=your_perplexity_api_key_here
+
+# Claude Configuration
+CLAUDE_MODEL=claude-3.7-sonnet
+CLAUDE_MAX_TOKENS=8000
+CLAUDE_TEMPERATURE=0.2
+
+# ngrok Configuration
+NGROK_AUTHTOKEN=your_ngrok_authtoken_here
+NGROK_DOMAIN=your_custom_domain_if_available
+```
+
+### 2. Build and Start Docker Containers
+
+```bash
+docker-compose up -d
+```
+
+This will start three services:
+- `web`: Flask app that handles webhooks (port 5000)
+- `trader`: The trading agent that processes analysis requests
+- `ngrok`: Creates a public URL for your webhook
+
+### 3. Get Your Public Webhook URL
+
+Access the ngrok dashboard at http://localhost:4040 to find your public URL.
+
+### 4. Configure TradingView Alerts
+
+Set up TradingView alerts with webhooks using the following format:
+
+1. In TradingView, create a new alert
+2. Set your conditions (price action, indicators, etc.)
+3. Under "Webhook URL", enter your ngrok URL + "/webhook"
+   Example: `https://your-domain.ngrok.io/webhook`
+4. Set the alert message format to JSON:
+   ```json
+   {
+     "ticker": "{{ticker}}",
+     "price": "{{close}}",
+     "alert_type": "buy_signal",
+     "timeframe": "5m"
+   }
+   ```
+5. Save the alert
+
+## Usage
+
+Once everything is set up, the system will:
+
+1. Receive webhooks from TradingView
+2. Capture and analyze chart screenshots using Claude 3.7 Sonnet (or Perplexity if Claude fails)
+3. Generate trading recommendations
+4. Execute trades on Bluefin Exchange when appropriate
+
+## Monitoring
+
+- Logs are stored in the `logs` directory
+- Screenshots are saved in the `screenshots` directory
+- Analysis reports are saved in the `analysis` directory
+
+You can monitor these files to track the agent's performance.
+
+## Troubleshooting
+
+- **Webhook errors**: Check the `logs/webhook_server.log` file
+- **Trading errors**: Check the `logs/bluefin_agent.log` file
+- **API issues**: Verify your API keys in the `.env` file
+- **Docker issues**: Run `docker-compose logs` to see container logs
 
 ## Overview
 
