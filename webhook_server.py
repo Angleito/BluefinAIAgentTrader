@@ -1,6 +1,7 @@
 import os
 import json
 import logging
+import asyncio
 from datetime import datetime
 import hmac
 import hashlib
@@ -51,41 +52,25 @@ VALID_SIGNAL_TYPES = [
     "BEAR_DIAMOND"    # Bearish: Pattern with HT red candle
 ]
 
-# Map signal types to trade direction
-BULLISH_SIGNALS = ["GREEN_CIRCLE", "GOLD_CIRCLE", "BULL_FLAG", "BULL_DIAMOND"]
-BEARISH_SIGNALS = ["RED_CIRCLE", "BEAR_FLAG", "BEAR_DIAMOND"]
-# PURPLE_TRIANGLE and LITTLE_CIRCLE need action specified as they can be both
+# Import core modules
+try:
+    from core.signal_processor import process_tradingview_alert
+except ImportError:
+    logger.warning("Cannot import signal_processor module. Continuing without trading functionality.")
 
-def get_trade_direction(signal_type, action=None):
-    """
-    Determine if a signal is Bullish (long) or Bearish (short)
-    
-    Args:
-        signal_type (str): The VuManChu Cipher B signal type
-        action (str, optional): BUY or SELL action, needed for ambiguous signals
-        
-    Returns:
-        str: "Bullish" for long trades, "Bearish" for short trades
-    """
-    if signal_type in BULLISH_SIGNALS:
-        return "Bullish"
-    elif signal_type in BEARISH_SIGNALS:
-        return "Bearish"
-    else:
-        # For ambiguous signals like PURPLE_TRIANGLE or LITTLE_CIRCLE
-        # use the specified action to determine direction
-        if action and action.upper() == "BUY":
-            return "Bullish"
-        elif action and action.upper() == "SELL":
-            return "Bearish"
-        else:
-            # Default to Bullish if can't determine
-            return "Bullish"
+    # Fallback implementation
+    def process_tradingview_alert(alert_data):
+        logger.info(f"Using fallback signal processor: {alert_data}")
+        return alert_data
 
 @app.route('/health', methods=['GET'])
 def health_check():
     """Simple health check endpoint."""
-    return jsonify({"status": "OK", "timestamp": datetime.utcnow().isoformat()})
+    return jsonify({
+        "status": "OK", 
+        "timestamp": datetime.utcnow().isoformat(),
+        "version": "1.0.0"
+    })
 
 @app.route('/webhook', methods=['POST'])
 def tradingview_webhook():
@@ -117,7 +102,7 @@ def tradingview_webhook():
         logger.info(f"Received webhook: {json.dumps(data)}")
         
         # Validate required fields
-        required_fields = ["indicator", "symbol", "timeframe", "action", "signal_type"]
+        required_fields = ["indicator", "symbol", "timeframe", "signal_type"]
         for field in required_fields:
             if field not in data:
                 logger.warning(f"Missing required field: {field}")
@@ -132,30 +117,32 @@ def tradingview_webhook():
                     "message": f"Invalid signal type. Must be one of: {', '.join(VALID_SIGNAL_TYPES)}"
                 }), 400
             
-            # Add trade direction (Bullish/Bearish) tag to the data
-            data["trade_direction"] = get_trade_direction(data["signal_type"], data.get("action"))
-            logger.info(f"Signal type: {data['signal_type']}, Trade direction: {data['trade_direction']}")
-        
         # Add timestamp if not provided
         if "timestamp" not in data:
             data["timestamp"] = datetime.utcnow().isoformat()
         
         # Process the VuManChu Cipher B alert
         if data["indicator"].lower() == "vmanchu_cipher_b":
-            # Here, you would implement logic to process the alert
-            # For now, we'll just log it and pass it to the agent
+            # Process the alert using the signal processor
+            processed_signal = process_tradingview_alert(data)
             
-            # Save the alert to a file for the agent to pick up
-            save_alert_for_agent(data)
+            if not processed_signal:
+                return jsonify({
+                    "status": "warning",
+                    "message": "Alert was received but not processed due to filtering rules"
+                }), 200
+            
+            # Save the processed alert to a file for the agent to pick up
+            save_alert_for_agent(processed_signal)
             
             # Return success response
             return jsonify({
                 "status": "success",
                 "message": "Alert received and processed",
-                "data": data
+                "data": processed_signal
             })
         else:
-            logger.warning(f"Unknown indicator: {data['indicator']}")
+            logger.warning(f"Unsupported indicator: {data['indicator']}")
             return jsonify({"status": "error", "message": "Unsupported indicator"}), 400
             
     except Exception as e:
@@ -170,7 +157,8 @@ def save_alert_for_agent(alert_data):
         
         # Generate a filename based on timestamp and symbol
         timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
-        filename = f"alerts/alert_{timestamp}_{alert_data['symbol'].replace('/', '_')}.json"
+        symbol = alert_data["symbol"].replace("/", "_").replace("-", "_")
+        filename = f"alerts/alert_{timestamp}_{symbol}.json"
         
         # Write the alert data to the file
         with open(filename, "w") as f:
@@ -178,26 +166,110 @@ def save_alert_for_agent(alert_data):
             
         logger.info(f"Alert saved to file: {filename}")
         
-        # Optionally, notify the agent directly
-        try:
-            agent_notify_url = "http://localhost:5000/api/process_alert"
-            requests.post(agent_notify_url, json=alert_data, timeout=1)
-            logger.info("Alert forwarded to agent")
-        except requests.exceptions.RequestException as e:
-            logger.warning(f"Could not forward alert to agent: {str(e)}")
+        # Notify the agent directly
+        notify_agent(alert_data)
     
     except Exception as e:
         logger.error(f"Error saving alert: {str(e)}", exc_info=True)
 
+def notify_agent(alert_data):
+    """Notify the agent of a new alert via API."""
+    try:
+        agent_api_url = os.getenv("AGENT_API_URL", "http://localhost:5000/api/process_alert")
+        
+        # Send asynchronously to avoid blocking
+        def send_notification():
+            try:
+                response = requests.post(
+                    agent_api_url, 
+                    json=alert_data, 
+                    timeout=2,
+                    headers={"Content-Type": "application/json"}
+                )
+                if response.status_code == 200:
+                    logger.info("Alert successfully forwarded to agent")
+                else:
+                    logger.warning(f"Agent returned non-200 status code: {response.status_code}")
+            except requests.exceptions.RequestException as e:
+                logger.warning(f"Could not forward alert to agent: {str(e)}")
+        
+        # Run in a separate thread to avoid blocking
+        from threading import Thread
+        thread = Thread(target=send_notification)
+        thread.daemon = True
+        thread.start()
+        
+    except Exception as e:
+        logger.error(f"Error notifying agent: {str(e)}", exc_info=True)
+
+@app.route('/test', methods=['GET'])
+def test_endpoint():
+    """Test endpoint to verify the webhook server is working."""
+    return jsonify({
+        "status": "OK",
+        "message": "Webhook server is running",
+        "timestamp": datetime.utcnow().isoformat(),
+        "endpoints": {
+            "webhook": "/webhook (POST)",
+            "health": "/health (GET)"
+        }
+    })
+
+@app.route('/simulate', methods=['POST'])
+def simulate_webhook():
+    """
+    Endpoint to simulate a TradingView webhook for testing.
+    
+    Example:
+    {
+        "indicator": "vmanchu_cipher_b",
+        "symbol": "SUI/USD",
+        "timeframe": "5m",
+        "signal_type": "GREEN_CIRCLE",
+        "action": "BUY"
+    }
+    """
+    try:
+        # This endpoint only works in development mode
+        if os.getenv("FLASK_ENV") != "development":
+            return jsonify({"status": "error", "message": "This endpoint is only available in development mode"}), 403
+            
+        # Get the request data
+        if not request.is_json:
+            return jsonify({"status": "error", "message": "Request must be JSON"}), 400
+            
+        data = request.json
+        if not data:
+            return jsonify({"status": "error", "message": "Empty JSON request"}), 400
+        
+        # Log that we're simulating a webhook
+        logger.info(f"Simulating webhook with data: {json.dumps(data)}")
+        
+        # Add timestamp if not provided
+        if "timestamp" not in data:
+            data["timestamp"] = datetime.utcnow().isoformat()
+            
+        # Forward to the webhook endpoint
+        response = tradingview_webhook()
+        
+        return response
+            
+    except Exception as e:
+        logger.error(f"Error simulating webhook: {str(e)}", exc_info=True)
+        return jsonify({"status": "error", "message": str(e)}), 500
+
 if __name__ == "__main__":
     port = int(os.getenv("WEBHOOK_PORT", 5001))
+    debug_mode = os.getenv("FLASK_DEBUG", "false").lower() == "true"
     
     # Print instructions for TradingView alerts
     print(f"\n{'='*50}")
     print("TradingView Webhook Server")
     print(f"{'='*50}")
     print(f"Listening on port: {port}")
-    print("To use with TradingView alerts, setup ngrok and use the webhook URL in TradingView.")
+    print(f"Debug mode: {'Enabled' if debug_mode else 'Disabled'}")
+    print("To use with TradingView alerts, set up ngrok and use the webhook URL in TradingView.")
     print(f"{'='*50}\n")
     
-    app.run(host="0.0.0.0", port=port, debug=False) 
+    # Run the Flask app
+    app.run(host="0.0.0.0", port=port, debug=debug_mode) 
