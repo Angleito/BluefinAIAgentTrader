@@ -10,7 +10,6 @@ services:
       - ./.env:/app/.env
     environment:
       - WEBHOOK_PORT=5001
-      - TV_WEBHOOK_SECRET=${TV_WEBHOOK_SECRET:-tradingview_secret}
       - FLASK_ENV=production
     command: python webhook_server.py
     restart: unless-stopped
@@ -25,5 +24,5 @@ services:
       - "4040:4040"
     depends_on:
       - webhook
-    command: http --domain=${NGROK_DOMAIN:-} webhook:5001
+    command: http --domain=awake-drake-bursting.ngrok-free.app webhook:5001
     restart: unless-stopped 
