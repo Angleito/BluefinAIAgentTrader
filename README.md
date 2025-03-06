@@ -114,6 +114,37 @@ If you encounter any issues:
    - Check account balance and available margin
    - Verify trading parameters in `config.py`
 
+## API Security Best Practices
+
+To ensure your trading account remains secure:
+
+1. **API Key Management**:
+   - Never commit your `.env` file to version control
+   - Rotate your API keys regularly (every 30-90 days)
+   - Use different keys for development and production
+
+2. **Permissions and Access**:
+   - Use keys with the minimum necessary permissions
+   - Consider read-only keys for monitoring and separate keys for trading
+   - If supported by Bluefin, restrict API key usage to specific IP addresses
+
+3. **Environment Separation**:
+   - Start with testnet for all testing and development
+   - Use separate keys for testnet and mainnet environments
+   - Implement additional safeguards when using mainnet (e.g., lower position sizes)
+
+4. **Secure Storage**:
+   - Store your `.env` file with restricted permissions (e.g., `chmod 600 .env`)
+   - Consider using a secrets manager for production deployments
+   - Never share your private keys or API secrets with others
+
+5. **Monitoring and Alerts**:
+   - Monitor for unauthorized API access or unusual trading activity
+   - Set up alerts for large trades or account balance changes
+   - Regularly review trading logs for suspicious activity
+
+For a comprehensive security checklist, see [SECURITY_CHECKLIST.md](SECURITY_CHECKLIST.md).
+
 ## References
 
 - [Bluefin API Documentation](https://bluefin-exchange.readme.io/reference/introduction)

@@ -3,7 +3,8 @@
 Bluefin Connection Test Script
 
 This script tests the connection to the Bluefin API and verifies that your
-authentication credentials are working properly.
+authentication credentials are working properly. It also performs basic security
+checks on your API configuration.
 
 Usage:
     python test_bluefin_connection.py
@@ -13,6 +14,7 @@ import os
 import asyncio
 import importlib.util
 import logging
+import time
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -32,6 +34,33 @@ network = os.getenv("BLUEFIN_NETWORK", "MAINNET")
 # Check if the Bluefin client modules are available
 BLUEFIN_CLIENT_SUI_AVAILABLE = importlib.util.find_spec("bluefin_client_sui") is not None
 BLUEFIN_V2_CLIENT_AVAILABLE = importlib.util.find_spec("bluefin.v2.client") is not None
+
+def check_env_file_permissions():
+    """Check if .env file has appropriate permissions."""
+    try:
+        if os.path.exists(".env"):
+            import stat
+            st = os.stat(".env")
+            permissions = st.st_mode & 0o777
+            
+            # Check if file is readable by others
+            if permissions & 0o044:
+                logger.warning("⚠️ Security risk: .env file is readable by others (permissions: %o)", permissions)
+                logger.warning("Recommended: Run 'chmod 600 .env' to restrict access")
+            else:
+                logger.info("✅ .env file has appropriate permissions")
+        else:
+            logger.warning("⚠️ .env file not found. Environment variables may be set elsewhere.")
+    except Exception as e:
+        logger.error(f"Error checking .env file permissions: {e}")
+
+def check_network_security():
+    """Check network security settings."""
+    if network.upper() == "MAINNET":
+        logger.warning("⚠️ Using MAINNET for API connections")
+        logger.warning("   Ensure this is intentional for production use")
+    else:
+        logger.info("✅ Using TESTNET for API connections (safer for testing)")
 
 async def test_connection():
     """Test connection to Bluefin API."""
@@ -129,16 +158,49 @@ async def test_connection():
     
     return False
 
+def print_security_recommendations():
+    """Print security recommendations for API usage."""
+    logger.info("\n===== SECURITY RECOMMENDATIONS =====")
+    logger.info("1. API Key Management:")
+    logger.info("   - Rotate your API keys regularly (every 30-90 days)")
+    logger.info("   - Use different keys for development and production")
+    
+    logger.info("\n2. Permissions and Access:")
+    logger.info("   - Use keys with the minimum necessary permissions")
+    logger.info("   - Consider read-only keys for monitoring")
+    
+    logger.info("\n3. Environment Separation:")
+    logger.info("   - Use separate keys for testnet and mainnet")
+    logger.info("   - Implement additional safeguards for mainnet")
+    
+    logger.info("\n4. Monitoring:")
+    logger.info("   - Set up alerts for unusual trading activity")
+    logger.info("   - Regularly review trading logs")
+    logger.info("=====================================")
+
 async def main():
     """Run the test."""
     logger.info("Testing Bluefin API connection...")
     
+    # Check .env file permissions
+    check_env_file_permissions()
+    
+    # Check network security
+    check_network_security()
+    
+    # Test API connection
+    start_time = time.time()
     success = await test_connection()
+    response_time = time.time() - start_time
     
     if success:
-        logger.info("🎉 Connection test passed! Your Bluefin API configuration is working properly.")
+        logger.info(f"🎉 Connection test passed! Your Bluefin API configuration is working properly.")
+        logger.info(f"API response time: {response_time:.2f} seconds")
     else:
         logger.error("❌ Connection test failed. Please check your API credentials and network settings.")
+    
+    # Print security recommendations
+    print_security_recommendations()
 
 if __name__ == "__main__":
     asyncio.run(main()) 

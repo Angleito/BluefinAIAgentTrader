@@ -615,45 +615,57 @@ async def main():
     try:
         # Initialize clients based on available libraries
         if BLUEFIN_CLIENT_SUI_AVAILABLE:
-            # Initialize SUI client according to documentation
-            # Reference: https://bluefin-exchange.readme.io/reference/initialization-example
-            logger.info("Initializing SUI-specific Bluefin client")
-            
+            # Use SUI client
             private_key = os.getenv("BLUEFIN_PRIVATE_KEY")
             if not private_key:
                 logger.error("BLUEFIN_PRIVATE_KEY not found in environment variables")
+                logger.error("Please add your private key to the .env file as BLUEFIN_PRIVATE_KEY=your_private_key_here")
+                logger.error("For security, never share your private key or commit it to version control")
                 return
                 
-            network = BLUEFIN_DEFAULTS.get("network", "MAINNET")
-            logger.info(f"Using network: {network}")
-            
             try:
+                from bluefin_client_sui import BluefinClient, Networks
+                
+                network_str = os.getenv("BLUEFIN_NETWORK", "MAINNET")
+                if network_str not in ["MAINNET", "TESTNET"]:
+                    logger.error(f"Invalid network: {network_str}. Must be either 'MAINNET' or 'TESTNET'")
+                    return
+                    
+                if network_str == "MAINNET":
+                    logger.warning("Using MAINNET for trading. Ensure this is intentional and that you understand the risks.")
+                    
                 client = BluefinClient(
                     True,  # agree to terms and conditions
-                    Networks[network],  # Use Networks["TESTNET"] or Networks["MAINNET"]
+                    Networks[network_str],  # Use Networks["TESTNET"] or Networks["MAINNET"]
                     private_key  # private key for authentication
                 )
                 
                 # Initialize client (onboard if first time)
                 await client.init(True)
-                logger.info(f'Connected to Bluefin with account address: {client.get_public_address()}')
+                address = client.get_public_address()
+                logger.info(f'Connected to Bluefin with account address: {address}')
             except Exception as e:
                 logger.error(f"Failed to initialize SUI client: {e}")
+                logger.error("Please verify your private key and network settings")
                 raise
-            
         elif BLUEFIN_V2_CLIENT_AVAILABLE:
-            # Initialize v2 client according to documentation
-            logger.info("Initializing v2 Bluefin client")
-            
+            # Use v2 client
             api_key = os.getenv("BLUEFIN_API_KEY")
             api_secret = os.getenv("BLUEFIN_API_SECRET")
             
             if not api_key or not api_secret:
                 logger.error("BLUEFIN_API_KEY or BLUEFIN_API_SECRET not found in environment variables")
+                logger.error("Please add your API credentials to the .env file as:")
+                logger.error("BLUEFIN_API_KEY=your_api_key_here")
+                logger.error("BLUEFIN_API_SECRET=your_api_secret_here")
+                logger.error("For security, never share your API credentials or commit them to version control")
                 return
                 
             network = BLUEFIN_DEFAULTS.get("network", "MAINNET").lower()
             logger.info(f"Using network: {network}")
+            
+            if network == "mainnet":
+                logger.warning("Using MAINNET for trading. Ensure this is intentional and that you understand the risks.")
                 
             try:
                 client = BluefinClient(
@@ -668,6 +680,7 @@ async def main():
                 logger.info("Connected to Bluefin exchange")
             except Exception as e:
                 logger.error(f"Failed to initialize v2 client: {e}")
+                logger.error("Please verify your API key, API secret, and network settings")
                 raise
         else:
             logger.error("No Bluefin client libraries available. Please install one of the client libraries.")
