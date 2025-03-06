@@ -2,11 +2,22 @@ import os
 import json
 import logging
 from datetime import datetime
-from flask import Flask, request, jsonify
 import hmac
 import hashlib
 import requests
-from dotenv import load_dotenv
+import sys
+
+try:
+    from flask import Flask, request, jsonify
+except ImportError:
+    print("Error: Flask package not installed. Run: pip install flask")
+    sys.exit(1)
+
+try:
+    from dotenv import load_dotenv
+except ImportError:
+    print("Error: python-dotenv package not installed. Run: pip install python-dotenv")
+    sys.exit(1)
 
 # Load environment variables
 load_dotenv()
@@ -30,6 +41,50 @@ app = Flask(__name__)
 # Optional security key for TradingView
 TV_WEBHOOK_SECRET = os.getenv("TV_WEBHOOK_SECRET", "")
 
+# Valid VuManChu Cipher B signal types with explicit Bullish/Bearish tags
+VALID_SIGNAL_TYPES = [
+    "GREEN_CIRCLE",   # Bullish: Wavetrend waves at oversold level and crossed up
+    "RED_CIRCLE",     # Bearish: Wavetrend waves at overbought level and crossed down
+    "GOLD_CIRCLE",    # Bullish: Strong Buy - RSI below 20, WaveTrend <= -80, crossed up after bullish divergence
+    "PURPLE_TRIANGLE", # Can be Bullish or Bearish: Divergence with WT crosses at overbought/oversold
+    "LITTLE_CIRCLE",  # Can be Bullish or Bearish: All WaveTrend wave crossings
+    "BULL_FLAG",      # Bullish: MFI+RSI>0, WT<0 and crossed up, VWAP>0 on higher timeframe
+    "BEAR_FLAG",      # Bearish: MFI+RSI<0, WT>0 and crossed down, VWAP<0 on higher timeframe
+    "BULL_DIAMOND",   # Bullish: Pattern with HT green candle
+    "BEAR_DIAMOND"    # Bearish: Pattern with HT red candle
+]
+
+# Map signal types to trade direction
+BULLISH_SIGNALS = ["GREEN_CIRCLE", "GOLD_CIRCLE", "BULL_FLAG", "BULL_DIAMOND"]
+BEARISH_SIGNALS = ["RED_CIRCLE", "BEAR_FLAG", "BEAR_DIAMOND"]
+# PURPLE_TRIANGLE and LITTLE_CIRCLE need action specified as they can be both
+
+def get_trade_direction(signal_type, action=None):
+    """
+    Determine if a signal is Bullish (long) or Bearish (short)
+    
+    Args:
+        signal_type (str): The VuManChu Cipher B signal type
+        action (str, optional): BUY or SELL action, needed for ambiguous signals
+        
+    Returns:
+        str: "Bullish" for long trades, "Bearish" for short trades
+    """
+    if signal_type in BULLISH_SIGNALS:
+        return "Bullish"
+    elif signal_type in BEARISH_SIGNALS:
+        return "Bearish"
+    else:
+        # For ambiguous signals like PURPLE_TRIANGLE or LITTLE_CIRCLE
+        # use the specified action to determine direction
+        if action and action.upper() == "BUY":
+            return "Bullish"
+        elif action and action.upper() == "SELL":
+            return "Bearish"
+        else:
+            # Default to Bullish if can't determine
+            return "Bullish"
+
 @app.route('/health', methods=['GET'])
 def health_check():
     """Simple health check endpoint."""
@@ -47,7 +102,7 @@ def tradingview_webhook():
         "symbol": "SUI/USD",
         "timeframe": "5m",
         "action": "BUY" or "SELL",
-        "signal_type": "WAVE1", "WAVE2", "RSI_BULL", etc.
+        "signal_type": "GREEN_CIRCLE", "RED_CIRCLE", "GOLD_CIRCLE", "PURPLE_TRIANGLE", "LITTLE_CIRCLE", etc.
         "timestamp": "2023-01-01T12:00:00Z"
     }
     """
@@ -65,11 +120,24 @@ def tradingview_webhook():
                 return jsonify({"status": "error", "message": "Invalid passphrase"}), 401
         
         # Validate required fields
-        required_fields = ["indicator", "symbol", "timeframe", "action"]
+        required_fields = ["indicator", "symbol", "timeframe", "action", "signal_type"]
         for field in required_fields:
             if field not in data:
                 logger.warning(f"Missing required field: {field}")
                 return jsonify({"status": "error", "message": f"Missing required field: {field}"}), 400
+        
+        # Validate signal type for VuManChu Cipher B
+        if data["indicator"].lower() == "vmanchu_cipher_b":
+            if data["signal_type"] not in VALID_SIGNAL_TYPES:
+                logger.warning(f"Invalid signal type: {data['signal_type']}")
+                return jsonify({
+                    "status": "error", 
+                    "message": f"Invalid signal type. Must be one of: {', '.join(VALID_SIGNAL_TYPES)}"
+                }), 400
+            
+            # Add trade direction (Bullish/Bearish) tag to the data
+            data["trade_direction"] = get_trade_direction(data["signal_type"], data.get("action"))
+            logger.info(f"Signal type: {data['signal_type']}, Trade direction: {data['trade_direction']}")
         
         # Add timestamp if not provided
         if "timestamp" not in data:
