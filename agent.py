@@ -55,6 +55,7 @@ from typing import Dict, List, Optional, Union, Any, TypeVar, Type, cast
 import requests
 import base64
 import aiohttp
+from anthropic import Client
 
 # Load environment variables from .env file
 load_dotenv()
@@ -627,6 +628,9 @@ async def open_position(symbol: str, side: str, size: float) -> Dict:
     logger.info(f"Opened {side} of {position_size} {symbol} at {order['price']}")
     
     return order
+
+# Initialize Claude client
+claude_client = Client(os.environ["ANTHROPIC_API_KEY"])
 
 async def main():
     """

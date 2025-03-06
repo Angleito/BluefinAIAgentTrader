@@ -67,9 +67,10 @@ BLUEFIN_CONFIG = {
 
 # Claude configuration
 CLAUDE_CONFIG = {
-    "api_key": os.getenv("CLAUDE_API_KEY"),
+    "api_key": os.getenv("ANTHROPIC_API_KEY"),
     "model": "claude-3.7-sonnet",
-    "temperature": 0,
+    "temperature": 0.2,
+    "max_tokens": 500
 }
 
 # Perplexity configuration
