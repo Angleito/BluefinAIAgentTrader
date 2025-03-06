@@ -272,7 +272,21 @@ def process_vmanchu_alert():
 def process_cipher_b_signal(symbol, timeframe, action, signal_type, alert_data):
     """Process a VuManChu Cipher B signal and make a trading decision"""
     try:
-        logger.info(f"Processing {signal_type} {action} signal for {symbol} on {timeframe}")
+        # Get the trade direction (Bullish/Bearish) from the alert data or calculate it
+        trade_direction = alert_data.get("trade_direction")
+        if not trade_direction:
+            # If trade_direction wasn't provided, determine it based on signal type and action
+            if signal_type in ["GREEN_CIRCLE", "GOLD_CIRCLE", "BULL_FLAG", "BULL_DIAMOND"]:
+                trade_direction = "Bullish"
+            elif signal_type in ["RED_CIRCLE", "BEAR_FLAG", "BEAR_DIAMOND"]:
+                trade_direction = "Bearish"
+            else:
+                # For ambiguous signals like PURPLE_TRIANGLE or LITTLE_CIRCLE
+                # use the specified action to determine direction
+                trade_direction = "Bullish" if action.upper() == "BUY" else "Bearish"
+        
+        logger.info(f"Processing {signal_type} signal for {symbol} on {timeframe}")
+        logger.info(f"Trade direction: {trade_direction}, Action: {action}")
         
         # In a full implementation, you would call your agent with specific parameters
         # for the VuManChu Cipher B indicator
@@ -282,6 +296,7 @@ def process_cipher_b_signal(symbol, timeframe, action, signal_type, alert_data):
             "--timeframe", timeframe,
             "--action", action,
             "--signal_type", signal_type,
+            "--trade_direction", trade_direction,
             "--vmanchu_mode"
         ]
         
@@ -300,6 +315,7 @@ def process_cipher_b_signal(symbol, timeframe, action, signal_type, alert_data):
                 "timeframe": timeframe,
                 "action": action,
                 "signal_type": signal_type,
+                "trade_direction": trade_direction,
                 "result": "Signal processed successfully"
             }
             

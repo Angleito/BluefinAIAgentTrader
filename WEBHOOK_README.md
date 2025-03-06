@@ -55,6 +55,18 @@ These signals require specifying the "action" field as either "BUY" (for Bullish
 1. **PURPLE_TRIANGLE**: Divergence signal - Appears when a bullish or bearish divergence is formed and WaveTrend waves cross at overbought and oversold points.
 2. **LITTLE_CIRCLE**: Basic signal - Appears at all WaveTrend wave crossings.
 
+## How Trade Direction is Determined
+
+The webhook server automatically adds a `trade_direction` field to each alert with either "Bullish" or "Bearish" value. This is determined as follows:
+
+1. For predefined bullish signals (GREEN_CIRCLE, GOLD_CIRCLE, BULL_FLAG, BULL_DIAMOND): Always "Bullish"
+2. For predefined bearish signals (RED_CIRCLE, BEAR_FLAG, BEAR_DIAMOND): Always "Bearish"
+3. For ambiguous signals (PURPLE_TRIANGLE, LITTLE_CIRCLE):
+   - If action is "BUY": Direction is "Bullish" (for long trades)
+   - If action is "SELL": Direction is "Bearish" (for short trades)
+
+The trading agent uses this `trade_direction` field to determine whether to execute a long or short trade. This ensures consistent behavior even when the signal type alone doesn't clearly indicate the trade direction.
+
 ## TradingView Alert Setup
 
 1. In TradingView, create a new alert for the VuManChu Cipher B indicator
@@ -67,8 +79,8 @@ These signals require specifying the "action" field as either "BUY" (for Bullish
   "indicator": "vmanchu_cipher_b",
   "symbol": "{{ticker}}",
   "timeframe": "{{interval}}",
-  "action": "BUY",
-  "signal_type": "GREEN_CIRCLE"
+  "action": "BUY",  // Use "BUY" for Bullish signals, "SELL" for Bearish signals
+  "signal_type": "GREEN_CIRCLE"  // Replace with appropriate signal type
 }
 ```
 
@@ -82,7 +94,7 @@ Use the included test script to verify the webhook is working:
 python test_webhook.py --url 'https://your-ngrok-url.ngrok.io/webhook' --action BUY --symbol SUI/USD --signal-type GREEN_CIRCLE
 ```
 
-You can test different signals by using the `--signal-type` parameter with any of the signal types listed above.
+You can test different signals by using the `--signal-type` parameter with any of the signal types listed above. Make sure to use the appropriate `--action` parameter ("BUY" for Bullish signals, "SELL" for Bearish signals).
 
 ## How it Works
 
