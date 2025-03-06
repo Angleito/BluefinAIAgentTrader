@@ -58,6 +58,7 @@ import aiohttp
 from anthropic import Client
 import re
 import tempfile
+import argparse
 
 # Load environment variables from .env file
 load_dotenv()
@@ -798,39 +799,30 @@ def test_claude_api():
         return False
 
 async def main():
-    """Main function to run the trading agent"""
-    logger.info("Starting trading agent")
+    """Main entry point for the trading agent"""
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='Trading Agent for Bluefin Exchange')
+    parser.add_argument('--ticker', type=str, default="SUI/USD", 
+                        help='Trading pair to analyze (default: SUI/USD)')
+    parser.add_argument('--timeframe', type=str, default="5m", 
+                        help='Chart timeframe to analyze (default: 5m)')
+    args = parser.parse_args()
     
-    # Initialize API clients
+    # Initialize clients
     init_clients()
     
-    # Load trading configuration
-    symbol = os.environ.get("DEFAULT_SYMBOL", "BTC/USD")
-    timeframe = os.environ.get("DEFAULT_TIMEFRAME", "1h")
+    # Begin trading analysis
+    logger.info(f"Beginning trading analysis for {args.ticker} on {args.timeframe} timeframe")
     
-    logger.info(f"Beginning trading analysis for {symbol} on {timeframe} timeframe")
+    # Analyze chart
+    chart_data = await analyze_tradingview_chart(args.ticker, args.timeframe)
     
-    try:
-        # Analyze TradingView chart using Perplexity only
-        chart_analysis = await analyze_tradingview_chart(symbol, timeframe)
-        
-        if not chart_analysis:
-            logger.error("Failed to analyze chart, aborting")
-            return
-        
-        # Log analysis results
-        logger.info(f"Chart analysis results: {json.dumps(chart_analysis, indent=2)}")
-        
-        # Execute trade if appropriate based on analysis
-        trade_result = await execute_trade_when_appropriate(chart_analysis)
-        
-        if trade_result:
-            logger.info(f"Trade executed: {trade_result}")
-        else:
-            logger.info("No trade executed")
+    if not chart_data:
+        logger.error(f"Failed to analyze chart for {args.ticker}")
+        return
     
-    except Exception as e:
-        logger.error(f"Error in trading analysis: {e}", exc_info=True)
+    # Execute trade based on analysis
+    await execute_trade_when_appropriate(chart_data)
     
     logger.info("Trading agent run completed")
 
@@ -1225,20 +1217,10 @@ def parse_perplexity_analysis(analysis, ticker):
     return recommendation
 
 if __name__ == "__main__":
-    # Set up logging
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-    )
-    logger = logging.getLogger('bluefin_agent')
-    
-    # Initialize clients
-    init_clients()
-    
-    # Run the main function (Perplexity only)
+    setup_logging()
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
         logger.info("Trading agent stopped by user")
     except Exception as e:
-        logger.critical(f"Fatal error: {e}", exc_info=True)
+        logger.error(f"Error in trading agent: {e}", exc_info=True)
