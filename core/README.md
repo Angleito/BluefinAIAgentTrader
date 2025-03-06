@@ -1,6 +1,6 @@
 # Core Trading Modules
 
-This directory contains core modules for trading performance tracking, risk management, and visualization.
+This directory contains core modules for trading performance tracking, risk management, visualization, and trade execution.
 
 ## Modules
 
@@ -87,6 +87,27 @@ win_loss_file = visualizer.plot_win_loss_distribution()
 
 # Generate a comprehensive performance report
 report_files = visualizer.generate_performance_report()
+```
+
+### Trade Executor (`trade_executor.py`)
+
+The Trade Executor module handles the execution of trades through the Bluefin API. It provides functionality to:
+
+- Open and close positions based on processed trading signals
+- Integrate with the risk manager to control position sizing
+- Set stop loss and take profit orders
+- Log executed trades for performance tracking
+
+```python
+from core.trade_executor import execute_trade
+
+# Assume bluefin_client is initialized and signal is processed
+trade_result = await execute_trade(bluefin_client, signal)
+
+if trade_result:
+    print(f"Trade executed: {trade_result}")
+else:
+    print("Trade execution failed")
 ```
 
 ## Example Usage

@@ -179,6 +179,7 @@ async def set_stop_loss(client, position, entry_price, direction, percentage=0.1
 2. [Sui Blockchain Documentation](https://sui.io/dev/developer-portal)
 3. [TradingView Webhook Documentation](https://www.tradingview.com/support/solutions/43000529348-webhooks/)
 4. [Original AI Trading Agent Repository](https://github.com/hackingthemarkets/ai-trading-agent)
+5. [Bluefin Documentation](https://bluefin-exchange.readme.io/reference/installation)
 
 By following these guidelines, you'll create a robust, efficient AI trading agent that leverages the high-performance Bluefin Exchange on Sui blockchain, with expert-level trading logic and comprehensive risk management.
 
