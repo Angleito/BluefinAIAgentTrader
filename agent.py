@@ -802,27 +802,54 @@ async def main():
     """Main entry point for the trading agent"""
     # Parse command line arguments
     parser = argparse.ArgumentParser(description='Trading Agent for Bluefin Exchange')
-    parser.add_argument('--ticker', type=str, default="SUI/USD", 
+    parser.add_argument('--ticker', '--symbol', type=str, default="SUI/USD", 
                         help='Trading pair to analyze (default: SUI/USD)')
     parser.add_argument('--timeframe', type=str, default="5m", 
                         help='Chart timeframe to analyze (default: 5m)')
+    parser.add_argument('--action', type=str, choices=['BUY', 'SELL'], 
+                        help='Trading action to take (BUY or SELL)')
+    parser.add_argument('--signal_type', type=str, 
+                        help='VuManChu Cipher B signal type')
+    parser.add_argument('--trade_direction', type=str, choices=['Bullish', 'Bearish'],
+                        help='Trading direction (Bullish for long, Bearish for short)')
+    parser.add_argument('--vmanchu_mode', action='store_true',
+                        help='Enable VuManChu Cipher B mode for signal processing')
     args = parser.parse_args()
     
     # Initialize clients
     init_clients()
     
     # Begin trading analysis
-    logger.info(f"Beginning trading analysis for {args.ticker} on {args.timeframe} timeframe")
+    ticker = args.ticker if args.ticker else args.symbol  # Support both ticker and symbol args
     
-    # Analyze chart
-    chart_data = await analyze_tradingview_chart(args.ticker, args.timeframe)
-    
-    if not chart_data:
-        logger.error(f"Failed to analyze chart for {args.ticker}")
-        return
-    
-    # Execute trade based on analysis
-    await execute_trade_when_appropriate(chart_data)
+    if args.vmanchu_mode and args.signal_type:
+        logger.info(f"Processing VuManChu Cipher B signal: {args.signal_type}")
+        logger.info(f"Trade direction: {args.trade_direction}, Action: {args.action}")
+        
+        # Process the VuManChu signal
+        # In a real implementation, you would execute a trade based on the signal
+        # For now, just log it
+        logger.info(f"Would execute a {args.action} trade for {ticker} based on {args.signal_type} signal")
+        
+        # Here you would call your trade execution function with the appropriate parameters
+        # Example:
+        # if args.trade_direction == "Bullish":
+        #     await open_position(ticker, ORDER_SIDE_ENUM.BUY, 0.1)
+        # elif args.trade_direction == "Bearish":
+        #     await open_position(ticker, ORDER_SIDE_ENUM.SELL, 0.1)
+    else:
+        # Standard chart analysis mode
+        logger.info(f"Beginning trading analysis for {ticker} on {args.timeframe} timeframe")
+        
+        # Analyze chart
+        chart_data = await analyze_tradingview_chart(ticker, args.timeframe)
+        
+        if not chart_data:
+            logger.error(f"Failed to analyze chart for {ticker}")
+            return
+        
+        # Execute trade based on analysis
+        await execute_trade_when_appropriate(chart_data)
     
     logger.info("Trading agent run completed")
 
