@@ -59,9 +59,18 @@ from anthropic import Client
 import re
 import tempfile
 import argparse
+import uvicorn
+from fastapi import FastAPI, Request
 
 # Load environment variables from .env file
 load_dotenv()
+
+# Set mock trading from environment variable
+MOCK_TRADING = os.getenv("MOCK_TRADING", "True").lower() == "true"
+if not MOCK_TRADING:
+    logger.info("Live trading mode enabled - will execute real trades on Bluefin")
+else:
+    logger.info("Mock trading mode enabled - no real trades will be executed")
 
 # Configure logging
 logging.basicConfig(
@@ -469,35 +478,8 @@ def get_timestamp():
     """Get current timestamp in YYYYMMDD_HHMMSS format"""
     return datetime.now().strftime("%Y%m%d_%H%M%S")
 
-# Update the mock PerplexityClient class to match the expected interface
-class MockPerplexityClient:
-    """Mock implementation of PerplexityClient"""
-    
-    def __init__(self, api_key=None):
-        self.api_key = api_key
-        logger.info("Using MockPerplexityClient")
-    
-    def analyze_chart(self, image_path, prompt):
-        logger.warning("[SIMULATION] Analyzing chart with mock client")
-        return {
-            "analysis": "Mock analysis - This is a simulated response",
-            "action": "BUY",
-            "confidence": 0.75,
-            "rationale": "This is a mock rationale for simulation purposes"
-        }
-    
-    def query(self, prompt):
-        logger.warning("[SIMULATION] Querying with mock client")
-        return {
-            "response": "Mock response - This is a simulated response to your query"
-        }
-
-# Try to import real PerplexityClient, fall back to mock if not available
-try:
-    from core.perplexity_client import PerplexityClient
-except ImportError:
-    logger.error("Could not import PerplexityClient from core.perplexity_client")
-    PerplexityClient = MockPerplexityClient  # Use mock implementation
+# Import mock perplexity client
+from mock_perplexity import MockPerplexityClient
 
 def opposite_type(order_type: str) -> str:
     """Get the opposite order type (BUY -> SELL, SELL -> BUY)"""
@@ -798,60 +780,29 @@ def test_claude_api():
         logger.error(f"Error testing Claude API: {e}", exc_info=True)
         return False
 
+async def start_api_server():
+    config = uvicorn.Config(app, host="0.0.0.0", port=5000)
+    server = uvicorn.Server(config)
+    await server.serve()
+
 async def main():
-    """Main entry point for the trading agent"""
-    # Parse command line arguments
-    parser = argparse.ArgumentParser(description='Trading Agent for Bluefin Exchange')
-    parser.add_argument('--ticker', '--symbol', type=str, default="SUI/USD", 
-                        help='Trading pair to analyze (default: SUI/USD)')
-    parser.add_argument('--timeframe', type=str, default="5m", 
-                        help='Chart timeframe to analyze (default: 5m)')
-    parser.add_argument('--action', type=str, choices=['BUY', 'SELL'], 
-                        help='Trading action to take (BUY or SELL)')
-    parser.add_argument('--signal_type', type=str, 
-                        help='VuManChu Cipher B signal type')
-    parser.add_argument('--trade_direction', type=str, choices=['Bullish', 'Bearish'],
-                        help='Trading direction (Bullish for long, Bearish for short)')
-    parser.add_argument('--vmanchu_mode', action='store_true',
-                        help='Enable VuManChu Cipher B mode for signal processing')
-    args = parser.parse_args()
+    setup_logging()
+    logger.info("Starting agent...")
     
-    # Initialize clients
-    init_clients()
+    # Create necessary directories
+    os.makedirs("alerts", exist_ok=True)
+    os.makedirs("logs", exist_ok=True)
     
-    # Begin trading analysis
-    ticker = args.ticker if args.ticker else args.symbol  # Support both ticker and symbol args
+    # Start API server in the background
+    api_task = asyncio.create_task(start_api_server())
     
-    if args.vmanchu_mode and args.signal_type:
-        logger.info(f"Processing VuManChu Cipher B signal: {args.signal_type}")
-        logger.info(f"Trade direction: {args.trade_direction}, Action: {args.action}")
-        
-        # Process the VuManChu signal
-        # In a real implementation, you would execute a trade based on the signal
-        # For now, just log it
-        logger.info(f"Would execute a {args.action} trade for {ticker} based on {args.signal_type} signal")
-        
-        # Here you would call your trade execution function with the appropriate parameters
-        # Example:
-        # if args.trade_direction == "Bullish":
-        #     await open_position(ticker, ORDER_SIDE_ENUM.BUY, 0.1)
-        # elif args.trade_direction == "Bearish":
-        #     await open_position(ticker, ORDER_SIDE_ENUM.SELL, 0.1)
-    else:
-        # Standard chart analysis mode
-        logger.info(f"Beginning trading analysis for {ticker} on {args.timeframe} timeframe")
-        
-        # Analyze chart
-        chart_data = await analyze_tradingview_chart(ticker, args.timeframe)
-        
-        if not chart_data:
-            logger.error(f"Failed to analyze chart for {ticker}")
-            return
-        
-        # Execute trade based on analysis
-        await execute_trade_when_appropriate(chart_data)
-    
-    logger.info("Trading agent run completed")
+    # Start alert processing loop
+    while True:
+        try:
+            await process_alerts()
+        except Exception as e:
+            logger.error(f"Error processing alerts: {e}")
+        await asyncio.sleep(1)
 
 def capture_chart_screenshot(ticker, timeframe="1D"):
     """Capture a screenshot of the TradingView chart for the given ticker and timeframe"""
@@ -1243,11 +1194,113 @@ def parse_perplexity_analysis(analysis, ticker):
         
     return recommendation
 
-if __name__ == "__main__":
-    setup_logging()
+async def execute_trade(symbol: str, side: str, position_size: float):
+    """Execute a real trade on Bluefin exchange."""
     try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        logger.info("Trading agent stopped by user")
+        logger.info(f"Executing real trade: {side} {position_size} of {symbol}")
+        
+        # Get parameters for symbol
+        leverage = int(os.getenv("DEFAULT_LEVERAGE", "5"))
+        
+        # Initialize Bluefin client if needed
+        global client
+        if client is None:
+            if BLUEFIN_CLIENT_SUI_AVAILABLE:
+                client = BluefinClient(private_key=os.getenv("BLUEFIN_PRIVATE_KEY"), network=Networks.MAINNET)
+            elif BLUEFIN_V2_CLIENT_AVAILABLE:
+                client = BluefinClient(api_key=os.getenv("BLUEFIN_API_KEY"), api_secret=os.getenv("BLUEFIN_API_SECRET"))
+            else:
+                raise Exception("No Bluefin client available for real trading")
+        
+        # Create order
+        order = await client.create_order(
+            symbol=symbol,
+            side=side,
+            size=position_size,
+            leverage=leverage
+        )
+        
+        logger.info(f"Trade executed successfully: Order ID {order.get('id', 'unknown')}")
+        return order
     except Exception as e:
-        logger.error(f"Error in trading agent: {e}", exc_info=True)
+        logger.error(f"Failed to execute trade: {e}", exc_info=True)
+        raise
+
+async def process_alerts():
+    """Process incoming alerts from the webhook server"""
+    
+    if not os.path.exists("alerts"):
+        os.makedirs("alerts", exist_ok=True)
+        return
+        
+    # Check for new alert files
+    for file in os.listdir("alerts"):
+        if file.endswith(".json"):
+            alert_path = os.path.join("alerts", file)
+            
+            try:
+                # Read the alert data
+                with open(alert_path, "r") as f:
+                    alert = json.load(f)
+                
+                logger.info(f"New alert received: {alert}")
+                
+                # Extract key data from the alert
+                if "indicator" in alert and alert["indicator"] == "vmanchu_cipher_b":
+                    symbol = alert.get("symbol", os.getenv("DEFAULT_SYMBOL", "SUI/USD"))
+                    timeframe = alert.get("timeframe", os.getenv("DEFAULT_TIMEFRAME", "5m"))
+                    signal_type = alert.get("signal_type", "")
+                    action = alert.get("action", "")
+                    
+                    logger.info(f"Processing VuManChu Cipher B signal: {signal_type}")
+                    logger.info(f"Symbol: {symbol}, Timeframe: {timeframe}, Action: {action}")
+                    
+                    # Determine trade direction based on signal type and action
+                    if action == "BUY":
+                        trade_direction = "Bullish"
+                        side = ORDER_SIDE_ENUM.BUY
+                    elif action == "SELL":
+                        trade_direction = "Bearish"
+                        side = ORDER_SIDE_ENUM.SELL
+                    else:
+                        logger.warning(f"Invalid action in alert: {action}")
+                        os.remove(alert_path)
+                        continue
+                    
+                    # Check if this is a valid signal type
+                    valid_signals = ["GREEN_CIRCLE", "RED_CIRCLE", "GOLD_CIRCLE", "PURPLE_TRIANGLE"]
+                    if signal_type not in valid_signals:
+                        logger.warning(f"Invalid signal type: {signal_type}")
+                        os.remove(alert_path)
+                        continue
+                    
+                    # Execute trade based on the signal
+                    if MOCK_TRADING:
+                        # Mock trade only - log the intent
+                        logger.info(f"MOCK TRADE: Would execute a {side} trade for {symbol} based on {signal_type} signal")
+                        logger.info(f"Trade direction: {trade_direction}")
+                    else:
+                        # Execute real trade on Bluefin
+                        try:
+                            position_size = float(os.getenv("DEFAULT_POSITION_SIZE_PCT", "0.05"))
+                            logger.info(f"Executing {side} trade for {symbol} with position size {position_size}")
+                            await execute_trade(symbol, side, position_size)
+                        except Exception as e:
+                            logger.error(f"Error executing trade: {e}")
+                else:
+                    logger.warning(f"Unsupported alert type: {alert}")
+                
+                # Clean up the processed alert file
+                os.remove(alert_path)
+                
+            except json.JSONDecodeError:
+                logger.error(f"Error decoding JSON from file: {alert_path}")
+                os.remove(alert_path)
+            except Exception as e:
+                logger.error(f"Error processing alert file {alert_path}: {e}")
+    
+    # Small delay to avoid high CPU usage
+    await asyncio.sleep(1)
+
+if __name__ == "__main__":
+    asyncio.run(main())
