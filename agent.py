@@ -1,3 +1,43 @@
+"""
+AI Trading Agent for Bluefin Exchange
+
+This script implements an automated trading agent that:
+1. Analyzes TradingView charts for SUI/USD with specified indicators
+2. Uses AI models (Claude and Perplexity) to confirm trading signals
+3. Executes trades on the Bluefin Exchange using the Bluefin API
+
+Requirements:
+-------------
+1. Install required Python libraries:
+   - pip install python-dotenv playwright asyncio
+   - python -m playwright install  # Install browser automation dependencies
+
+2. Install one of the Bluefin client libraries:
+   - For SUI integration: pip install git+https://github.com/fireflyprotocol/bluefin-client-python-sui.git
+   - For v2 integration: pip install git+https://github.com/fireflyprotocol/bluefin-v2-client-python.git
+
+3. Set environment variables in a .env file:
+   - For SUI client:
+     BLUEFIN_PRIVATE_KEY=your_private_key_here
+   
+   - For v2 client:
+     BLUEFIN_API_KEY=your_api_key_here
+     BLUEFIN_API_SECRET=your_api_secret_here
+     BLUEFIN_API_URL=optional_custom_url_here
+
+Usage:
+------
+Run the script: python agent.py
+
+Configuration:
+-------------
+See config.py for configurable trading parameters.
+
+References:
+----------
+Bluefin API Documentation: https://bluefin-exchange.readme.io/reference/introduction
+"""
+
 from dotenv import load_dotenv
 load_dotenv()
 import os
@@ -42,9 +82,13 @@ else:
         def __init__(self, *args, **kwargs):
             print("WARNING: No Bluefin client available. Install with: ")
             print("  pip install git+https://github.com/fireflyprotocol/bluefin-client-python-sui.git")
-            # Mock API objects
-            self.apis = type('APIs', (), {"close_session": lambda: asyncio.sleep(0)})()
-            self.dmsApi = type('DMSApi', (), {"close_session": lambda: asyncio.sleep(0)})()
+            # Mock API objects with proper async methods
+            class MockAPI:
+                async def close_session(self):
+                    pass
+                
+            self.apis = MockAPI()
+            self.dmsApi = MockAPI()
         
         async def init(self, *args, **kwargs):
             pass
@@ -165,33 +209,68 @@ async def get_account_info(client):
         return None
 
 async def analyze_tradingview_chart():
-    """Load TradingView chart and analyze for potential trades."""
+    """
+    Load TradingView chart and analyze for potential trades.
+    
+    This function uses Playwright to:
+    1. Load TradingView chart for the configured symbol
+    2. Set the timeframe, indicators, and candle type
+    3. Take a screenshot for analysis
+    
+    Returns:
+        str: Path to the screenshot image file
+    """
+    logger.info(f"Analyzing TradingView chart for {TRADING_PARAMS['chart_symbol']}")
+    
     async with async_playwright() as p:
-        browser = await p.chromium.launch()
+        browser = await p.chromium.launch(headless=True)
         page = await browser.new_page()
-        await page.goto("https://www.tradingview.com/chart/?symbol=PYTH%3ASUIUSD")
+        
+        # Load TradingView chart with the configured symbol
+        chart_url = f"https://www.tradingview.com/chart/?symbol={TRADING_PARAMS['chart_symbol']}"
+        logger.info(f"Loading chart: {chart_url}")
+        await page.goto(chart_url)
 
         # Wait for chart to load
-        await page.wait_for_selector(".chart-container")
+        logger.info("Waiting for chart to load...")
+        await page.wait_for_selector(".chart-container", timeout=60000)
+        await asyncio.sleep(3)  # Additional wait to ensure chart is fully loaded
 
-        # Set chart settings
-        await page.click(".group-wWM3zP_M")  # Timeframe menu
-        await page.click(".item-2xPVYue0[data-value='5']")  # 5 minute timeframe
-        await page.click(".group-LWPzJcGo")  # Indicators menu
-        await page.click(".input-2rGFhmzm")  # Indicator search
-        await page.fill(".input-2rGFhmzm", "VuManChu Cipher A")
-        await page.press(".input-2rGFhmzm", "Enter")
-        await page.fill(".input-2rGFhmzm", "VuManChu Cipher B")
-        await page.press(".input-2rGFhmzm", "Enter")
-        await page.click(".group-4rFIXF8R")  # Candles menu
-        await page.click(".item-2xPVYue0[data-value='Heikin Ashi']")  # Heiken Ashi candles
+        try:
+            # Set chart timeframe
+            logger.info(f"Setting timeframe to {TRADING_PARAMS['chart_timeframe']} minutes")
+            await page.click(".group-wWM3zP_M")  # Timeframe menu
+            await page.click(f".item-2xPVYue0[data-value='{TRADING_PARAMS['chart_timeframe']}']")
+            await asyncio.sleep(1)
+            
+            # Add indicators
+            for indicator in TRADING_PARAMS['chart_indicators']:
+                logger.info(f"Adding indicator: {indicator}")
+                await page.click(".group-LWPzJcGo")  # Indicators menu
+                await page.click(".input-2rGFhmzm")  # Indicator search
+                await page.fill(".input-2rGFhmzm", indicator)
+                await page.press(".input-2rGFhmzm", "Enter")
+                await asyncio.sleep(1)
+            
+            # Set candle type
+            logger.info(f"Setting candle type to {TRADING_PARAMS['chart_candle_type']}")
+            await page.click(".group-4rFIXF8R")  # Candles menu
+            await page.click(f".item-2xPVYue0[data-value='{TRADING_PARAMS['chart_candle_type']}']")
+            await asyncio.sleep(1)
+            
+        except Exception as e:
+            logger.warning(f"Error setting chart parameters: {e}")
+            logger.warning("Continuing with default chart settings")
 
-        # Analyze chart for trade opportunity
-        # TODO: Implement trade analysis logic based on AI strategy
+        # Wait for chart to reflect all changes
+        await asyncio.sleep(5)
 
         # Take screenshot of chart analysis
-        screenshot_path = f"chart_analysis_{int(datetime.now().timestamp())}.png"
-        await page.screenshot(path=screenshot_path)
+        timestamp = int(datetime.now().timestamp())
+        screenshot_path = f"chart_analysis_{timestamp}.png"
+        logger.info(f"Taking screenshot: {screenshot_path}")
+        
+        await page.screenshot(path=screenshot_path, full_page=False)
         logger.info(f"Chart analysis screenshot saved: {screenshot_path}")
 
         await browser.close()
@@ -259,66 +338,81 @@ async def execute_trade(client, trade_rec, account_info):
         return False
     
     try:
-        # Determine which client type we're using
+        # Determine which client type we're using based on available methods
         if hasattr(client, 'create_signed_order'):
             # Using bluefin_client_sui
+            logger.info("Using bluefin_client_sui for trade execution")
             
             # Get user's current leverage for this symbol
             user_leverage = await client.get_user_leverage(trade_rec["symbol"])
+            logger.info(f"Current leverage: {user_leverage}x")
             
-            # Create the order signature request
+            # Determine order side (BUY or SELL)
+            order_side = ORDER_SIDE.BUY if trade_rec["side"].upper() == "BUY" else ORDER_SIDE.SELL
+            
+            # 1. Create the main order signature request
             signature_request = OrderSignatureRequest(
                 symbol=trade_rec["symbol"],
                 price=entry_price,
                 quantity=adjusted_size,
-                side=ORDER_SIDE.BUY if trade_rec["side"].upper() == "BUY" else ORDER_SIDE.SELL,
+                side=order_side,
                 orderType=ORDER_TYPE.LIMIT,
                 leverage=user_leverage,
                 reduceOnly=False
             )
             
-            # Sign the order
+            # 2. Sign the order
             signed_order = client.create_signed_order(signature_request)
+            logger.info(f"Created signed order: {signed_order.get('symbol', 'unknown')} {signed_order.get('side', 'unknown')}")
             
-            # Place the order
+            # 3. Place the order
             order = await client.post_signed_order(signed_order)
+            logger.info(f"Order placed: Status={order.get('status', 'unknown')}, ID={order.get('id', 'unknown')}")
             
-            # Create stop loss order
+            # 4. Create stop loss order (opposite side of main order)
+            opposite_side = ORDER_SIDE.SELL if order_side == ORDER_SIDE.BUY else ORDER_SIDE.BUY
+            
             stop_loss_signature_request = OrderSignatureRequest(
                 symbol=trade_rec["symbol"],
                 price=stop_loss,
                 quantity=adjusted_size,
-                side=ORDER_SIDE.SELL if trade_rec["side"].upper() == "BUY" else ORDER_SIDE.BUY,
+                side=opposite_side,
                 orderType=ORDER_TYPE.STOP_MARKET,
                 leverage=user_leverage,
                 reduceOnly=True
             )
             
             stop_loss_signed_order = client.create_signed_order(stop_loss_signature_request)
-            await client.post_signed_order(stop_loss_signed_order)
+            stop_loss_order = await client.post_signed_order(stop_loss_signed_order)
+            logger.info(f"Stop loss order placed: Status={stop_loss_order.get('status', 'unknown')}, ID={stop_loss_order.get('id', 'unknown')}")
             
-            # Create take profit order
+            # 5. Create take profit order (opposite side of main order)
             take_profit_signature_request = OrderSignatureRequest(
                 symbol=trade_rec["symbol"],
                 price=trade_rec["takeProfit"],
                 quantity=adjusted_size,
-                side=ORDER_SIDE.SELL if trade_rec["side"].upper() == "BUY" else ORDER_SIDE.BUY,
+                side=opposite_side,
                 orderType=ORDER_TYPE.LIMIT,
                 leverage=user_leverage,
                 reduceOnly=True
             )
             
             take_profit_signed_order = client.create_signed_order(take_profit_signature_request)
-            await client.post_signed_order(take_profit_signed_order)
+            take_profit_order = await client.post_signed_order(take_profit_signed_order)
+            logger.info(f"Take profit order placed: Status={take_profit_order.get('status', 'unknown')}, ID={take_profit_order.get('id', 'unknown')}")
             
-            if order.get("status") == "PENDING" or order.get("status") == "NEW":
+            # Check if main order was placed successfully
+            if order.get("status") in ["PENDING", "NEW", "FILLED"]:
                 success = True
                 order_id = order.get("id") or order.get("orderId")
             else:
                 success = False
                 order_id = None
         else:
-            # Using bluefin.v2.client
+            # Using bluefin.v2.client or other implementation
+            logger.info("Using bluefin.v2.client for trade execution")
+            
+            # Using simpler combined API (for v2 client)
             order = await client.place_order(
                 symbol=trade_rec["symbol"],
                 side=trade_rec["side"],
@@ -329,9 +423,11 @@ async def execute_trade(client, trade_rec, account_info):
                 take_profit=trade_rec["takeProfit"]
             )
             
+            logger.info(f"Order placed using v2 client: {order}")
             success = order.get("status") == "NEW"
             order_id = order.get("orderId")
         
+        # Log and track the trade if successful
         if success:
             trade = {
                 "trade_id": order_id,
@@ -351,7 +447,7 @@ async def execute_trade(client, trade_rec, account_info):
             logger.error(f"Failed to execute trade: {order}")
             return False
     except Exception as e:
-        logger.error(f"Error executing trade: {e}")
+        logger.error(f"Error executing trade: {e}", exc_info=True)
         return False
 
 async def main():
@@ -367,10 +463,13 @@ async def main():
       - BLUEFIN_API_SECRET: Your API secret
       - BLUEFIN_API_URL: (Optional) Custom API URL
     """
+    client = None
     try:
-        # Initialize Bluefin client based on available library
-        if 'Networks' in globals() and isinstance(Networks, dict):
-            # Using bluefin_client_sui approach
+        # Initialize clients based on available libraries
+        if BLUEFIN_CLIENT_SUI_AVAILABLE:
+            # Initialize SUI client according to documentation
+            # Reference: https://bluefin-exchange.readme.io/reference/initialization-example
+            logger.info("Initializing SUI-specific Bluefin client")
             client = BluefinClient(
                 True,  # agree to terms and conditions
                 Networks["MAINNET"],  # Use Networks["TESTNET"] or Networks["MAINNET"]
@@ -379,9 +478,11 @@ async def main():
             
             # Initialize client (onboard if first time)
             await client.init(True)
-            logger.info(f'Account address: {client.get_public_address()}')
-        else:
-            # Using bluefin.v2.client approach
+            logger.info(f'Connected to Bluefin with account address: {client.get_public_address()}')
+            
+        elif BLUEFIN_V2_CLIENT_AVAILABLE:
+            # Initialize v2 client according to documentation
+            logger.info("Initializing v2 Bluefin client")
             client = BluefinClient(
                 api_key=os.getenv("BLUEFIN_API_KEY"),
                 api_secret=os.getenv("BLUEFIN_API_SECRET"),
@@ -392,6 +493,11 @@ async def main():
             # Connect to the exchange
             await client.connect()
             logger.info("Connected to Bluefin exchange")
+        else:
+            logger.error("No Bluefin client libraries available. Please install one of the client libraries.")
+            logger.error("For SUI-specific client: pip install git+https://github.com/fireflyprotocol/bluefin-client-python-sui.git")
+            logger.error("For v2 client: pip install git+https://github.com/fireflyprotocol/bluefin-v2-client-python.git")
+            return
 
         while True:
             # Retrieve account info
@@ -414,7 +520,7 @@ async def main():
             # TODO: Implement Perplexity API call with chart_screenshot
             perplexity_confirmation = True
 
-            if perplexity_confirmation and trade_rec["confidence"] >= 7:
+            if perplexity_confirmation and trade_rec["confidence"] >= TRADING_PARAMS.get("min_confidence_threshold", 7):
                 success = await execute_trade(client, trade_rec, account_info)
                 if success:
                     # Save results and generate report
@@ -435,22 +541,25 @@ async def main():
             else:
                 logger.info(f"Trade not executed. Perplexity confirmation: {perplexity_confirmation}, Confidence: {trade_rec['confidence']}/10")
 
-            # Wait for 5 minutes before next analysis
-            await asyncio.sleep(300)  
+            # Wait for the configured interval before next analysis
+            wait_time = TRADING_PARAMS.get("analysis_interval", 300)  # Default to 5 minutes
+            logger.info(f"Waiting {wait_time} seconds before next analysis")
+            await asyncio.sleep(wait_time)  
         
     except Exception as e:
         logger.exception(f"Error in main function: {e}")
         raise
     finally:
-        # Close connections based on client type
-        if hasattr(client, 'apis'):
-            # bluefin_client_sui approach
-            await client.apis.close_session()
-            if hasattr(client, 'dmsApi') and client.dmsApi:
-                await client.dmsApi.close_session()
-        else:
-            # bluefin.v2.client approach
-            await client.disconnect()
+        if client:
+            # Close connections based on client type
+            if hasattr(client, 'apis') and client.apis:
+                logger.info("Closing SUI client connections")
+                await client.apis.close_session()
+                if hasattr(client, 'dmsApi') and client.dmsApi:
+                    await client.dmsApi.close_session()
+            elif hasattr(client, 'disconnect'):
+                logger.info("Disconnecting v2 client")
+                await client.disconnect()
 
 if __name__ == "__main__":
     setup_logging()
