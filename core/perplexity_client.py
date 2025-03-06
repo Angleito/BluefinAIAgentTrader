@@ -92,56 +92,48 @@ class PerplexityClient:
         
         Args:
             chart_image_path: Path to the chart image file.
-            prompt: The prompt to guide the analysis.
+            prompt: The prompt to guide the analysis (e.g., "Looking at this chart, would you take xyz trade?").
             
         Returns:
             The analysis result from Perplexity.
         """
-        if not self.api_key:
-            logger.error("Perplexity API key is not set. Cannot analyze chart.")
-            return {"error": "API key not configured"}
+        if not self.api_key or not os.path.exists(chart_image_path):
+            logger.error(f"API key not set or image not found: {chart_image_path}")
+            return {"error": "Cannot analyze chart - missing API key or image file"}
         
         try:
-            # Check if the image file exists
-            if not os.path.exists(chart_image_path):
-                logger.error(f"Chart image file not found: {chart_image_path}")
-                return {"error": f"Image file not found: {chart_image_path}"}
-            
-            # Prepare the multipart form data
             self._rate_limit()
             
-            # For Perplexity's vision API
-            endpoint = f"{self.BASE_URL}/chat/completions"
-            
-            with open(chart_image_path, "rb") as image_file:
-                # Convert image to base64 for API compatibility
+            # Read and encode image
+            with open(chart_image_path, "rb") as img_file:
                 import base64
-                encoded_image = base64.b64encode(image_file.read()).decode('utf-8')
-                
-                payload = {
-                    "model": "llama-3-sonar-small-32k-vision",  # Use appropriate model for vision capabilities
-                    "messages": [
-                        {
-                            "role": "user",
-                            "content": [
-                                {"type": "text", "text": prompt},
-                                {
-                                    "type": "image_url", 
-                                    "image_url": {
-                                        "url": f"data:image/jpeg;base64,{encoded_image}"
-                                    }
+                encoded_image = base64.b64encode(img_file.read()).decode('utf-8')
+            
+            # Prepare vision API request
+            payload = {
+                "model": "llama-3-sonar-small-32k-vision",
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt},
+                            {
+                                "type": "image_url", 
+                                "image_url": {
+                                    "url": f"data:image/jpeg;base64,{encoded_image}"
                                 }
-                            ]
-                        }
-                    ],
-                    "max_tokens": 4000
-                }
-                
-                response = self.session.post(endpoint, json=payload)
-                result = self._handle_response(response)
-                
-                logger.info(f"Chart analysis completed for {chart_image_path}")
-                return result
+                            }
+                        ]
+                    }
+                ],
+                "max_tokens": 4000
+            }
+            
+            # Send request and process response
+            response = self.session.post(f"{self.BASE_URL}/chat/completions", json=payload)
+            result = self._handle_response(response)
+            logger.info(f"Chart analysis completed for {os.path.basename(chart_image_path)}")
+            return result
                 
         except Exception as e:
             logger.error(f"Error analyzing chart: {e}")
@@ -203,7 +195,6 @@ class PerplexityClient:
         try:
             # Extract the content from the response
             content = analysis_result.get("choices", [{}])[0].get("message", {}).get("content", "")
-            
             if not content:
                 return {"action": "HOLD", "confidence": 0.0, "rationale": "No content in response"}
             
@@ -213,14 +204,8 @@ class PerplexityClient:
             
             {content}
             
-            Please format your response as JSON with these fields:
-            - action: Either "BUY", "SELL", or "HOLD"
-            - confidence: A decimal between 0.0 and 1.0 indicating confidence
-            - rationale: A brief explanation for the recommendation
-            - timeframe: The suggested timeframe for this trade (short-term, medium-term, long-term)
-            - risk_level: Estimated risk level (low, medium, high)
-            
-            Return ONLY the JSON object, nothing else.
+            Format as JSON with: action (BUY/SELL/HOLD), confidence (0.0-1.0), 
+            rationale, timeframe, and risk_level. Return ONLY JSON.
             """
             
             extraction_result = self.query(extraction_prompt)
@@ -230,52 +215,36 @@ class PerplexityClient:
             import json
             try:
                 # Clean up the response to handle potential formatting issues
-                # Remove markdown code blocks if present
-                if "```json" in extracted_content:
-                    extracted_content = extracted_content.split("```json")[1].split("```")[0].strip()
-                elif "```" in extracted_content:
+                if "```" in extracted_content:
                     extracted_content = extracted_content.split("```")[1].split("```")[0].strip()
                 
                 recommendation = json.loads(extracted_content)
                 
                 # Validate and sanitize the recommendation
                 valid_actions = ["BUY", "SELL", "HOLD"]
-                if recommendation.get("action", "").upper() not in valid_actions:
+                recommendation["action"] = recommendation.get("action", "HOLD").upper()
+                if recommendation["action"] not in valid_actions:
                     recommendation["action"] = "HOLD"
-                else:
-                    recommendation["action"] = recommendation["action"].upper()
                 
                 # Ensure confidence is a float between 0 and 1
-                try:
-                    confidence = float(recommendation.get("confidence", 0.0))
-                    recommendation["confidence"] = max(0.0, min(1.0, confidence))
-                except (ValueError, TypeError):
-                    recommendation["confidence"] = 0.0
-                
-                # Ensure required fields exist
-                if "rationale" not in recommendation:
-                    recommendation["rationale"] = "No rationale provided"
+                recommendation["confidence"] = max(0.0, min(1.0, float(recommendation.get("confidence", 0.5))))
+                recommendation["rationale"] = recommendation.get("rationale", "No rationale provided")
+                recommendation["timeframe"] = recommendation.get("timeframe", "medium-term")
+                recommendation["risk_level"] = recommendation.get("risk_level", "medium")
                 
                 return recommendation
                 
-            except json.JSONDecodeError:
-                logger.warning(f"Failed to parse recommendation JSON: {extracted_content}")
-                # Attempt a more basic extraction if JSON parsing fails
+            except (json.JSONDecodeError, ValueError, TypeError):
+                # Fallback extraction if parsing fails
+                logger.warning("Failed to parse recommendation JSON")
                 action = "HOLD"
-                confidence = 0.5
-                rationale = "Could not parse structured recommendation"
-                
-                if "buy" in extracted_content.lower():
-                    action = "BUY"
-                    confidence = 0.6
-                elif "sell" in extracted_content.lower():
-                    action = "SELL"
-                    confidence = 0.6
+                if "buy" in extracted_content.lower(): action = "BUY"
+                elif "sell" in extracted_content.lower(): action = "SELL"
                 
                 return {
                     "action": action,
-                    "confidence": confidence,
-                    "rationale": rationale,
+                    "confidence": 0.5,
+                    "rationale": "Could not parse structured recommendation",
                     "timeframe": "medium-term",
                     "risk_level": "medium"
                 }
