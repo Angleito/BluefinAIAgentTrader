@@ -1,0 +1,12 @@
+---
+description: A guide for cursor to follow when developing this project
+globs: .py .json .env .toml 
+alwaysApply: false
+---
+
+
+
+# Your rule content
+[Comprehensive Guide_ AI Trading Agent for Bluefin.md](mdc:Comprehensive Guide_ AI Trading Agent for Bluefin.md)
+- You can @ files here
+- You can use markdown but dont have to
