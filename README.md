@@ -23,7 +23,8 @@ The system consists of the following core components:
 4. Perplexity AI for analyzing TradingView charts and confirming trades
 5. Risk management system for controlling trading risk
 6. Performance tracking and visualization system
-7. Comprehensive logging system
+7. Trade execution module for opening and closing positions
+8. Comprehensive logging system
 
 ## Setup
 
@@ -61,8 +62,9 @@ The agent will:
 3. Confirm the trade using Perplexity AI chart analysis
 4. Apply risk management rules to determine position size and risk parameters
 5. Execute the trade on Bluefin Exchange if confirmed
-6. Track performance and generate visualizations
-7. Log all activity and track performance metrics
+6. Set stop loss and take profit orders
+7. Track performance and generate visualizations
+8. Log all activity and track performance metrics
 
 ## Trading Parameters
 
@@ -104,6 +106,15 @@ The visualization module (`core/visualization.py`) generates charts and graphs f
 - Win/loss distributions
 - Monthly performance
 - Drawdown analysis
+
+### Trade Execution
+
+The trade execution module (`core/trade_executor.py`) handles the execution of trades through the Bluefin API, providing functionality to:
+
+- Open and close positions based on processed trading signals
+- Integrate with the risk manager to control position sizing
+- Set stop loss and take profit orders
+- Log executed trades for performance tracking
 
 See the `core/README.md` file for more detailed information on these modules.
 
