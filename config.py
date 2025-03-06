@@ -1,31 +1,46 @@
+"""
+Configuration file for the Perplexity Trader.
+
+This file contains all configurable parameters for the trading agent.
+"""
+
 import os
 
 # Trading parameters
 TRADING_PARAMS = {
-    # Account and risk settings
-    "initial_account_balance": 10000,  # Initial account balance for risk calculations
-    "max_risk_per_trade": 0.02,        # Maximum risk per trade (2% of account)
-    "max_concurrent_positions": 3,     # Maximum number of open positions
-    "max_daily_drawdown": 0.05,        # Maximum daily drawdown (5% of account)
+    # Chart analysis parameters
+    "chart_symbol": "BTCUSDT",  # Symbol to analyze on TradingView
+    "timeframe": "1h",          # Chart timeframe (e.g., 1m, 5m, 15m, 1h, 4h, 1d)
+    "candle_type": "Heikin Ashi",  # Candle type (Regular, Heikin Ashi, etc.)
+    "indicators": ["MACD", "RSI", "Bollinger Bands"],  # Indicators to add to chart
     
-    # Default stop loss/take profit settings if not provided in analysis
-    "stop_loss_percentage": 0.02,      # Default stop loss (2% from entry)
-    "take_profit_percentage": 0.04,    # Default take profit (4% from entry)
+    # Trading execution parameters
+    "trading_symbol": "BTC-PERP",  # Symbol to trade on Bluefin
+    "leverage": 5,                 # Leverage to use for trades
+    "min_confidence": 0.7,         # Minimum confidence score to execute a trade (0.0-1.0)
+    "max_position_size_usd": 1000, # Maximum position size in USD
+    "stop_loss_percentage": 0.02,  # Default stop loss percentage if not provided by AI
+    "take_profit_multiplier": 2,   # Take profit as multiple of risk (risk:reward ratio)
     
-    # Trading confidence threshold
-    "min_confidence_threshold": 7,     # Minimum confidence score to execute a trade (out of 10)
-    
-    # TradingView chart settings
-    "chart_timeframe": "5",            # Chart timeframe in minutes
-    "chart_symbol": "PYTH:SUIUSD",     # Trading symbol
-    "chart_indicators": [
-        "VuManChu Cipher A",
-        "VuManChu Cipher B"
-    ],
-    "chart_candle_type": "Heikin Ashi",
-    
-    # Trading monitoring
-    "analysis_interval": 300,          # Time between analyses in seconds (5 minutes)
+    # Operational parameters
+    "analysis_interval_seconds": 300,  # Time between analyses in seconds (5 minutes)
+}
+
+# Risk management parameters
+RISK_PARAMS = {
+    "max_risk_per_trade": 0.02,     # Maximum risk per trade (2% of account)
+    "max_open_positions": 3,        # Maximum number of open positions
+    "max_daily_loss": 0.05,         # Maximum daily loss (5% of account)
+    "min_risk_reward_ratio": 2.0,   # Minimum risk:reward ratio
+}
+
+# AI analysis parameters
+AI_PARAMS = {
+    "use_perplexity": True,         # Whether to use Perplexity for analysis
+    "use_claude": True,             # Whether to use Claude for analysis
+    "perplexity_confidence_threshold": 0.7,  # Minimum confidence for Perplexity
+    "claude_confidence_threshold": 0.7,      # Minimum confidence for Claude
+    "confidence_concordance_required": True, # Require both AIs to agree
 }
 
 # Risk management configuration
