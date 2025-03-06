@@ -371,172 +371,231 @@ async def get_account_info(client):
 
 async def analyze_tradingview_chart() -> Dict[str, Any]:
     """
-    Analyzes a TradingView chart by taking a screenshot for AI analysis.
+    Analyze TradingView chart by taking a screenshot and using AI to interpret it.
     
     Returns:
-        Dict containing analysis results and screenshot data.
+        Dict containing analysis results and metadata
     """
+    symbol = TRADING_PARAMS.get("chart_symbol", "BTCUSDT")
+    timeframe = TRADING_PARAMS.get("timeframe", "1h")
+    indicators = TRADING_PARAMS.get("indicators", ["MACD", "RSI", "Bollinger Bands"])
+    candle_type = TRADING_PARAMS.get("candle_type", "Heikin Ashi")
+    
+    logger.info(f"Starting chart analysis for {symbol} on {timeframe} timeframe")
+    
+    # Create screenshots directory if it doesn't exist
+    os.makedirs("screenshots", exist_ok=True)
+    
+    screenshot = None
     try:
-        logger.info("Starting TradingView chart analysis")
-        symbol = TRADING_PARAMS.get("chart_symbol", "SUIUSD")
-        timeframe = TRADING_PARAMS.get("chart_timeframe", "5")
-        indicators = TRADING_PARAMS.get("chart_indicators", ["VuManChu Cipher A", "VuManChu Cipher B"])
-        candle_type = TRADING_PARAMS.get("chart_candle_type", "Heikin Ashi")
-        
-        logger.info(f"Analyzing chart for {symbol} on {timeframe} timeframe with indicators: {indicators}")
-        
-        # Example URL (would need to be adapted for actual TradingView embedding)
-        chart_url = f"https://www.tradingview.com/chart/?symbol={symbol}&interval={timeframe}"
-        
+        # Import Playwright only when needed
         from playwright.async_api import async_playwright
         
-        logger.info(f"Loading TradingView chart from URL: {chart_url}")
-        
+        # Launch browser
         async with async_playwright() as p:
-            browser = await p.chromium.launch()
-            page = await browser.new_page()
+            browser = await p.chromium.launch(headless=True)
+            context = await browser.new_context()
+            page = await context.new_page()
             
-            # Load TradingView chart
-            await page.goto(chart_url)
-            logger.info("Chart page loaded, waiting for rendering...")
+            # Navigate to TradingView in advanced chart mode
+            tradingview_url = f"https://www.tradingview.com/chart/?symbol={symbol}"
+            logger.info(f"Opening TradingView: {tradingview_url}")
+            await page.goto(tradingview_url)
             
             # Wait for chart to load
-            await page.wait_for_selector(".chart-container", timeout=30000)
-            logger.info("Chart container found")
+            await page.wait_for_selector(".chart-container", state="visible", timeout=30000)
+            logger.info("Chart loaded successfully")
             
-            # Set timeframe if different from default
-            try:
-                await page.click(f"[data-item-id='{timeframe}']")
-                logger.info(f"Set timeframe to {timeframe}")
-            except Exception as e:
-                logger.error(f"Error setting timeframe: {e}")
+            # Set timeframe if specified
+            if timeframe:
+                logger.info(f"Setting timeframe to {timeframe}")
+                await page.click(".button-3_SlRy")  # Timeframe button
+                await page.wait_for_selector(".menuBox-g78rwseM", state="visible")
+                
+                # Find and click the appropriate timeframe
+                timeframe_selector = f"[data-value='{timeframe}']"
+                await page.click(timeframe_selector)
+                await page.wait_for_timeout(1000)  # Short wait for timeframe to apply
             
-            # Set candle type if needed
-            if candle_type.lower() != "regular":
-                try:
-                    # This is a simplified example - actual implementation would depend on TradingView's DOM structure
-                    await page.click(".chart-style-button")
-                    await page.click(f"text='{candle_type}'")
-                    logger.info(f"Set candle type to {candle_type}")
-                except Exception as e:
-                    logger.error(f"Error setting candle type: {e}")
-            
-            # Add indicators if needed
+            # Add indicators if specified
             for indicator in indicators:
-                try:
-                    # This is a simplified example - actual implementation would depend on TradingView's DOM structure
-                    await page.click(".indicators-button")
-                    await page.fill(".search-input", indicator)
-                    await page.click(f"text='{indicator}'")
-                    logger.info(f"Added indicator: {indicator}")
-                except Exception as e:
-                    logger.error(f"Error adding indicator {indicator}: {e}")
+                logger.info(f"Adding indicator: {indicator}")
+                await page.click("#header-toolbar-indicators")
+                await page.wait_for_selector(".search-ZXzPWcCf", state="visible")
+                await page.fill(".search-ZXzPWcCf", indicator)
+                await page.wait_for_timeout(500)
+                await page.click(".container-VpBYJEEr.container-VpBYJEEr-with-text")
+                await page.wait_for_timeout(1000)  # Wait for indicator to be added
             
-            # Wait for chart to update with all indicators
-            await asyncio.sleep(5)
+            # Set candle type if specified
+            if candle_type != "Regular":
+                logger.info(f"Setting candle type to {candle_type}")
+                await page.click("#header-toolbar-chart-styles")
+                await page.wait_for_selector(".menu-SfBLKmDc", state="visible")
+                
+                # Select Heikin Ashi from dropdown
+                candle_selectors = {
+                    "Heikin Ashi": "Heikin Ashi",
+                    "Hollow": "Hollow Candles",
+                    "Bar": "Bars",
+                    "Line": "Line",
+                }
+                
+                candle_option = candle_selectors.get(candle_type, candle_type)
+                candle_xpath = f"//span[contains(text(), '{candle_option}')]"
+                await page.click(candle_xpath)
+                await page.wait_for_timeout(1000)  # Wait for candle type to apply
+            
+            # Wait a moment for all changes to apply
+            logger.info("Waiting for chart to stabilize before taking screenshot")
+            await page.wait_for_timeout(5000)
+            
+            # Generate a timestamp-based filename for the screenshot
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            screenshot_path = f"screenshots/{symbol}_{timeframe}_{timestamp}.png"
             
             # Take screenshot
-            logger.info("Taking screenshot of the chart")
-            screenshot = await page.screenshot()
+            logger.info(f"Taking screenshot of the chart and saving to {screenshot_path}")
+            await page.screenshot(path=screenshot_path)
             
             # Close browser
             await browser.close()
             
-            logger.info("Chart analysis completed successfully")
-            
-            # Return analysis results
-            return {
-                "timestamp": datetime.now().isoformat(),
-                "symbol": symbol,
-                "timeframe": timeframe,
-                "screenshot": screenshot,
-                "message": "Chart analysis completed successfully",
-                "indicators_used": indicators,
-                "candle_type": candle_type
-            }
-            
+        if os.path.exists(screenshot_path) and AI_PARAMS.get("use_perplexity", True):
+            logger.info("Using Perplexity API for chart analysis")
+            try:
+                # Import the PerplexityClient
+                from core.perplexity_client import get_perplexity_client
+                
+                # Get client instance
+                perplexity_client = get_perplexity_client()
+                
+                # Create analysis prompt
+                analysis_prompt = """
+                Analyze this TradingView chart with technical indicators and patterns.
+                
+                Focus on:
+                1. The current trend direction based on candle patterns
+                2. Key technical indicators visible on the chart
+                3. Important support and resistance levels
+                4. Volume patterns if visible
+                5. Any significant chart patterns (head & shoulders, double tops, etc.)
+                
+                Determine if this is a valid trading signal. Provide:
+                - Clear BUY, SELL, or HOLD recommendation
+                - Confidence level (0.0-1.0)
+                - Approximate entry price if applicable
+                - Suggested stop loss level
+                - Take profit target
+                - Key reasoning for your recommendation
+                """
+                
+                # Analyze chart with Perplexity
+                perplexity_result = perplexity_client.analyze_chart(screenshot_path, analysis_prompt)
+                
+                # Extract structured trading recommendation
+                recommendation = perplexity_client.extract_trading_recommendation(perplexity_result)
+                
+                logger.info(f"Perplexity analysis complete: {recommendation['action']} with confidence {recommendation['confidence']}")
+                
+                # Return combined results
+                return {
+                    "timestamp": datetime.now().isoformat(),
+                    "symbol": symbol,
+                    "timeframe": timeframe,
+                    "screenshot_path": screenshot_path,
+                    "indicators_used": indicators,
+                    "candle_type": candle_type,
+                    "perplexity_analysis": recommendation,
+                    "full_response": perplexity_result
+                }
+            except ImportError:
+                logger.warning("PerplexityClient not found, skipping AI analysis")
+            except Exception as e:
+                logger.error(f"Error in Perplexity analysis: {e}", exc_info=True)
+        
+        # Return basic analysis if Perplexity failed or isn't enabled
+        logger.info("Chart analysis completed with screenshot only")
+        return {
+            "timestamp": datetime.now().isoformat(),
+            "symbol": symbol,
+            "timeframe": timeframe,
+            "screenshot_path": screenshot_path,
+            "indicators_used": indicators,
+            "candle_type": candle_type
+        }
+        
     except Exception as e:
         logger.error(f"Error analyzing TradingView chart: {e}", exc_info=True)
         return {
             "timestamp": datetime.now().isoformat(),
-            "error": str(e),
-            "message": "Failed to analyze chart",
-            "screenshot": None
+            "symbol": symbol,
+            "timeframe": timeframe,
+            "error": str(e)
         }
 
 def extract_trade_recommendation(analysis: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Extract trade recommendation from AI analysis of chart.
+    Extract a structured trade recommendation from the chart analysis.
     
     Args:
-        analysis: Dictionary containing analysis results
+        analysis: Chart analysis data including Perplexity results if available
         
     Returns:
-        Dictionary with trade recommendation details
+        Dict with trade recommendation details
     """
-    # This is a placeholder implementation
-    # In a real system, this would parse the AI analysis text or call an AI API
-    
-    # Default to no trade
+    # Default recommendation
     recommendation = {
         "action": "NONE",  # NONE, BUY, SELL
-        "symbol": TRADING_PARAMS.get("trading_symbol", "SUI-PERP"),
+        "confidence": 0.0,
         "entry_price": 0.0,
         "stop_loss": 0.0,
         "take_profit": 0.0,
-        "confidence": 0.0,  # 0.0 to 1.0
-        "reason": "No trade opportunity detected",
-        "timestamp": datetime.now().isoformat()
+        "reason": "No analysis available"
     }
     
-    # Check if we have an error
-    if "error" in analysis:
-        logger.warning(f"Cannot extract trade recommendation due to analysis error: {analysis.get('error')}")
+    # Check if we have Perplexity analysis
+    if "perplexity_analysis" in analysis:
+        perplexity_result = analysis["perplexity_analysis"]
+        
+        # Use Perplexity's analysis result
+        recommendation["action"] = perplexity_result.get("action", "NONE")
+        recommendation["confidence"] = perplexity_result.get("confidence", 0.0)
+        recommendation["reason"] = perplexity_result.get("rationale", "No clear analysis provided")
+        
+        # Extract price levels if available
+        entry_price = perplexity_result.get("entry_price")
+        if entry_price is not None:
+            recommendation["entry_price"] = entry_price
+            
+        stop_loss = perplexity_result.get("stop_loss")
+        if stop_loss is not None:
+            recommendation["stop_loss"] = stop_loss
+            
+        take_profit = perplexity_result.get("take_profit")
+        if take_profit is not None:
+            recommendation["take_profit"] = take_profit
+            
+        # If we have entry price but no stop loss or take profit, calculate them
+        if recommendation["entry_price"] > 0 and recommendation["stop_loss"] <= 0:
+            stop_loss_pct = TRADING_PARAMS.get("stop_loss_percentage", 0.02)  # 2% default
+            take_profit_multiplier = TRADING_PARAMS.get("take_profit_multiplier", 2)  # 2x risk
+            
+            if recommendation["action"] == "BUY":
+                recommendation["stop_loss"] = recommendation["entry_price"] * (1 - stop_loss_pct)
+                risk = recommendation["entry_price"] - recommendation["stop_loss"]
+                recommendation["take_profit"] = recommendation["entry_price"] + (risk * take_profit_multiplier)
+            elif recommendation["action"] == "SELL":
+                recommendation["stop_loss"] = recommendation["entry_price"] * (1 + stop_loss_pct)
+                risk = recommendation["stop_loss"] - recommendation["entry_price"]
+                recommendation["take_profit"] = recommendation["entry_price"] - (risk * take_profit_multiplier)
+                
+        logger.info(f"Extracted trade recommendation from Perplexity: {recommendation['action']} with confidence {recommendation['confidence']}")
         return recommendation
     
-    # In a real implementation, this would use AI to analyze the chart
-    # For now, this is just a placeholder with a random simple algorithm
-    
-    # Simulate a basic analysis
-    import random
-    
-    # Random confidence (placeholder for actual AI analysis)
-    confidence = random.uniform(0.3, 0.9)
-    confidence = round(confidence, 2)
-    
-    # Placeholder entry price (would come from actual chart analysis)
-    entry_price = random.uniform(900, 1100)  # Placeholder for BTC price
-    
-    # Decide action based on confidence
-    if confidence > TRADING_PARAMS.get("min_confidence", 0.7):
-        # Randomly choose buy or sell for demonstration
-        action = "BUY" if random.random() > 0.5 else "SELL"
-        
-        # Set stop loss and take profit based on action
-        stop_loss_pct = 0.02  # 2% from entry
-        take_profit_pct = 0.05  # 5% from entry
-        
-        if action == "BUY":
-            stop_loss = entry_price * (1 - stop_loss_pct)
-            take_profit = entry_price * (1 + take_profit_pct)
-            reason = "Strong upward momentum detected"
-        else:  # SELL
-            stop_loss = entry_price * (1 + stop_loss_pct)
-            take_profit = entry_price * (1 - take_profit_pct)
-            reason = "Bearish pattern forming"
-            
-        recommendation = {
-            "action": action,
-            "symbol": TRADING_PARAMS.get("trading_symbol", "SUI-PERP"),
-            "entry_price": round(entry_price, 2),
-            "stop_loss": round(stop_loss, 2),
-            "take_profit": round(take_profit, 2),
-            "confidence": confidence,
-            "reason": reason,
-            "timestamp": datetime.now().isoformat()
-        }
-    
-    logger.info(f"Trade recommendation: {recommendation['action']} with confidence {recommendation['confidence']}")
+    # Fallback to basic recommendation if no Perplexity analysis
+    # This is a simplified algorithm as fallback
+    logger.info("No Perplexity analysis available, using fallback recommendation")
     return recommendation
 
 @backoff.on_exception(backoff.expo, 
@@ -897,10 +956,10 @@ async def main():
                     logger.info(f"Trade analysis saved to {analysis_file}")
                     
                     # Save screenshot if available
-                    if "screenshot" in analysis and analysis["screenshot"]:
+                    if "screenshot_path" in analysis and analysis["screenshot_path"]:
                         screenshot_file = f"screenshots/chart_{timestamp}.png"
                         with open(screenshot_file, "wb") as f:
-                            f.write(analysis["screenshot"])
+                            f.write(open(analysis["screenshot_path"], "rb").read())
                         logger.info(f"Chart screenshot saved to {screenshot_file}")
                 else:
                     logger.info(f"No trade executed - action: {trade_rec['action']}, confidence: {trade_rec['confidence']}")
