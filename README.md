@@ -8,6 +8,8 @@ This project implements an AI trading agent that utilizes Claude Sonnet 3.7 for 
 - Trade signal generation using TradingView webhooks with VumanChu Cipher A and B indicators and Heiken Ashi candles
 - Trade confirmation and chart analysis using Perplexity AI
 - Integration with Bluefin Exchange API for order execution and account management
+- Advanced risk management and position sizing
+- Performance tracking and visualization tools
 - Configurable trading parameters (leverage, position size, stop loss)
 - Comprehensive logging and error handling
 
@@ -19,7 +21,9 @@ The system consists of the following core components:
 2. TradingView webhook listener for receiving trading signals 
 3. AI decision-making engine powered by Claude Sonnet 3.7
 4. Perplexity AI for analyzing TradingView charts and confirming trades
-5. Performance tracking and logging system
+5. Risk management system for controlling trading risk
+6. Performance tracking and visualization system
+7. Comprehensive logging system
 
 ## Setup
 
@@ -55,8 +59,10 @@ The agent will:
 1. Listen for TradingView webhook signals
 2. Analyze the signals using Claude Sonnet 3.7
 3. Confirm the trade using Perplexity AI chart analysis
-4. Execute the trade on Bluefin Exchange if confirmed
-5. Log all activity and track performance metrics
+4. Apply risk management rules to determine position size and risk parameters
+5. Execute the trade on Bluefin Exchange if confirmed
+6. Track performance and generate visualizations
+7. Log all activity and track performance metrics
 
 ## Trading Parameters
 
@@ -69,12 +75,51 @@ The default trading parameters are:
 
 These parameters can be modified in the `config.py` file.
 
+## Core Modules
+
+### Performance Tracking
+
+The performance tracking module (`core/performance_tracker.py`) logs and analyzes trading performance, providing metrics such as:
+
+- Win rate
+- Profit factor
+- Average profit/loss
+- Maximum drawdown
+- Total P&L
+
+### Risk Management
+
+The risk management module (`core/risk_manager.py`) helps control trading risk and position sizing, providing functionality to:
+
+- Calculate position sizes based on risk parameters
+- Check if new trades can be opened based on risk limits
+- Calculate stop loss and take profit levels
+- Determine when positions should be adjusted or closed
+
+### Visualization
+
+The visualization module (`core/visualization.py`) generates charts and graphs for trading performance analysis, including:
+
+- Equity curves
+- Win/loss distributions
+- Monthly performance
+- Drawdown analysis
+
+See the `core/README.md` file for more detailed information on these modules.
+
+## Examples
+
+The `examples` directory contains example scripts demonstrating how to use the various modules:
+
+- `performance_analysis_example.py`: Demonstrates how to use the performance tracking, risk management, and visualization modules
+
 ## Future Enhancements
 
 - Implement a web interface for monitoring trades and performance
 - Add more advanced risk management techniques
 - Support additional exchanges and trading pairs
 - Enhance the AI models with ongoing training and optimization
+- Implement portfolio optimization algorithms
 
 ## License
 

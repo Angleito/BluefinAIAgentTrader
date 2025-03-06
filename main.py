@@ -1,10 +1,21 @@
 import asyncio
 import logging
 import logging.config
+import os
 from fastapi import FastAPI
 from bluefin_client_sui import BluefinClient, Networks
-from config import BLUEFIN_CONFIG, LOGGING_CONFIG, TRADINGVIEW_WEBHOOK_CONFIG
+from config import (
+    BLUEFIN_CONFIG, 
+    LOGGING_CONFIG, 
+    TRADINGVIEW_WEBHOOK_CONFIG, 
+    TRADING_PARAMS,
+    PERFORMANCE_TRACKING_CONFIG,
+    RISK_MANAGEMENT_CONFIG
+)
 from api.webhook_handler import router as webhook_router
+from core.performance_tracker import performance_tracker
+from core.risk_manager import risk_manager
+from core.visualization import visualizer
 
 # Configure logging
 logging.config.dictConfig(LOGGING_CONFIG)
@@ -23,12 +34,52 @@ async def startup_event():
     )
     await bluefin_client.init(True)
     logger.info("Bluefin client initialized.")
+    
+    # Initialize risk manager with trading parameters
+    logger.info("Initializing risk manager...")
+    risk_manager.update_account_balance(TRADING_PARAMS["initial_account_balance"])
+    risk_manager.max_risk_per_trade = TRADING_PARAMS["max_risk_per_trade"]
+    risk_manager.max_open_trades = TRADING_PARAMS["max_concurrent_positions"]
+    risk_manager.max_risk_per_symbol = TRADING_PARAMS["max_risk_per_symbol"]
+    risk_manager.max_daily_drawdown = TRADING_PARAMS["max_daily_drawdown"]
+    logger.info("Risk manager initialized.")
+    
+    # Initialize performance tracker
+    logger.info("Initializing performance tracker...")
+    # Create a custom instance with the configured log file
+    global performance_tracker
+    performance_tracker = performance_tracker
+    logger.info("Performance tracker initialized.")
+    
+    # Initialize visualizer
+    logger.info("Initializing visualizer...")
+    # Create visualizations directory if it doesn't exist
+    os.makedirs(PERFORMANCE_TRACKING_CONFIG["visualizations_dir"], exist_ok=True)
+    global visualizer
+    visualizer = visualizer
+    logger.info("Visualizer initialized.")
 
 @app.on_event("shutdown")
 async def shutdown_event():
     logger.info("Closing Bluefin client...")
     await bluefin_client.close()
     logger.info("Bluefin client closed.")
+    
+    # Generate final performance report
+    logger.info("Generating final performance report...")
+    report_files = visualizer.generate_performance_report()
+    logger.info(f"Performance report generated: {report_files}")
+    
+    # Log performance metrics
+    metrics = performance_tracker.get_performance_metrics()
+    logger.info("Final performance metrics:")
+    logger.info(f"Total Trades: {metrics['total_trades']}")
+    logger.info(f"Win Rate: {metrics['win_rate']:.2%}")
+    logger.info(f"Average Profit: {metrics['average_profit']:.2f}")
+    logger.info(f"Average Loss: {metrics['average_loss']:.2f}")
+    logger.info(f"Profit Factor: {metrics['profit_factor']:.2f}")
+    logger.info(f"Total P&L: {metrics['total_pnl']:.2f}")
+    logger.info(f"Maximum Drawdown: {metrics['max_drawdown']:.2f}")
 
 app.include_router(webhook_router)
 
