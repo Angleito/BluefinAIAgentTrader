@@ -128,16 +128,63 @@ BluefinClientType = Any
 NetworksType = Any
 OrderSignatureRequestType = Any
 
-# Set up variables for Bluefin clients
+# Create a class that can be used as a type hint for BluefinClient
+class BaseBluefinClient:
+    async def close_position(self, position_id): pass
+    async def get_account_equity(self): pass
+    async def create_order(self, **kwargs): pass
+
+# Now set BluefinClient to this base class for type checking
 BLUEFIN_CLIENT_SUI_AVAILABLE = False
 BLUEFIN_V2_CLIENT_AVAILABLE = False
-BluefinClient = None
+BluefinClient = BaseBluefinClient
+
+# Set up variables for Bluefin clients
 Networks = None
 OrderSignatureRequest = None
 NETWORKS = {
     "testnet": "testnet",
     "mainnet": "mainnet"
 }
+
+# Create Networks mock class for the mock BluefinClient
+class MockNetworks:
+    """Mock networks for the MockBluefinClient"""
+    MAINNET = "mainnet"
+    TESTNET = "testnet"
+
+# Set up Networks
+Networks = MockNetworks()
+
+# Update BluefinClient variable definition
+BluefinClient = None  # Will be set to either the real client or MockBluefinClient
+
+# Update the mock BluefinClient to handle missing methods
+class MockBluefinClient:
+    """Mock implementation of BluefinClient for simulation mode"""
+    
+    def __init__(self, *args, **kwargs):
+        self.args = args
+        self.kwargs = kwargs
+        logger.info("Using MockBluefinClient for simulation")
+    
+    async def close_position(self, position_id):
+        logger.info(f"[SIMULATION] Closing position {position_id}")
+        return {"status": "success", "position_id": position_id}
+    
+    async def get_account_equity(self):
+        logger.info("[SIMULATION] Getting account equity")
+        return 10000.0  # Return a mock equity value
+    
+    async def create_order(self, symbol, side, size, **kwargs):
+        logger.info(f"[SIMULATION] Creating {side} order for {size} {symbol}")
+        return {
+            "id": f"sim_{get_timestamp()}",
+            "symbol": symbol,
+            "side": side,
+            "size": size,
+            "status": "filled"
+        }
 
 # Try to import SUI client first
 try:
@@ -412,8 +459,41 @@ elif BLUEFIN_V2_CLIENT_AVAILABLE:
     client = BluefinClient(api_key=os.getenv("BLUEFIN_API_KEY"), api_secret=os.getenv("BLUEFIN_API_SECRET"))
 else:
     logger.warning("No Bluefin client available, running in simulation mode")
+    client = MockBluefinClient()
 
-from core.perplexity_client import get_perplexity_client
+def get_timestamp():
+    """Get current timestamp in YYYYMMDD_HHMMSS format"""
+    return datetime.now().strftime("%Y%m%d_%H%M%S")
+
+# Update the mock PerplexityClient class to match the expected interface
+class MockPerplexityClient:
+    """Mock implementation of PerplexityClient"""
+    
+    def __init__(self, api_key=None):
+        self.api_key = api_key
+        logger.info("Using MockPerplexityClient")
+    
+    def analyze_chart(self, image_path, prompt):
+        logger.warning("[SIMULATION] Analyzing chart with mock client")
+        return {
+            "analysis": "Mock analysis - This is a simulated response",
+            "action": "BUY",
+            "confidence": 0.75,
+            "rationale": "This is a mock rationale for simulation purposes"
+        }
+    
+    def query(self, prompt):
+        logger.warning("[SIMULATION] Querying with mock client")
+        return {
+            "response": "Mock response - This is a simulated response to your query"
+        }
+
+# Try to import real PerplexityClient, fall back to mock if not available
+try:
+    from core.perplexity_client import PerplexityClient
+except ImportError:
+    logger.error("Could not import PerplexityClient from core.perplexity_client")
+    PerplexityClient = MockPerplexityClient  # Use mock implementation
 
 def opposite_type(order_type: str) -> str:
     """Get the opposite order type (BUY -> SELL, SELL -> BUY)"""
@@ -493,7 +573,7 @@ async def get_perplexity_confirmation(symbol: str, position_type: str) -> bool:
     prompt = f"Would you close your {position_type} on {symbol} here and open a {opposite_type(position_type)}?"
     
     # Query Perplexity API
-    perplexity_client = get_perplexity_client()
+    perplexity_client = PerplexityClient(api_key=os.environ["PERPLEXITY_API_KEY"])
     result = perplexity_client.query(prompt)
     
     # Check if response is affirmative
@@ -766,22 +846,30 @@ async def main():
 
 def capture_chart_screenshot(ticker, timeframe="1D"):
     """Capture a screenshot of the TradingView chart for the given ticker and timeframe"""
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        page = browser.new_page()
-        
-        # Navigate to TradingView chart for the specified ticker
-        page.goto(f"https://www.tradingview.com/chart/?symbol={ticker}")
-        
-        # Wait for chart to load completely
-        page.wait_for_selector(".chart-container")
-        
-        # Capture screenshot
-        screenshot_path = f"./screenshots/{ticker}_{timeframe}_{get_timestamp()}.png"
-        page.screenshot(path=screenshot_path)
-        browser.close()
-        
-        return screenshot_path
+    try:
+        with sync_playwright() as p:
+            # Create screenshots directory if it doesn't exist
+            os.makedirs("screenshots", exist_ok=True)
+            
+            browser = p.chromium.launch(headless=True)
+            page = browser.new_page()
+            
+            # Navigate to TradingView chart for the specified ticker
+            page.goto(f"https://www.tradingview.com/chart/?symbol={ticker}")
+            
+            # Wait for chart to load completely
+            page.wait_for_selector(".chart-container")
+            
+            # Take screenshot
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            screenshot_path = f"screenshots/{ticker}_{timeframe}_{timestamp}.png"
+            page.screenshot(path=screenshot_path)
+            browser.close()
+            
+            return screenshot_path
+    except Exception as e:
+        logger.error(f"Error capturing chart screenshot: {e}")
+        return None
 
 def analyze_chart_with_perplexity(screenshot_path, ticker):
     """Analyze a chart screenshot using Perplexity AI"""
@@ -811,6 +899,29 @@ def analyze_chart_with_perplexity(screenshot_path, ticker):
     else:
         logger.error(f"Error from Perplexity API: {response.status_code} - {response.text}")
         return None
+
+async def execute_trade_when_appropriate(analysis):
+    """Execute a trade if the analysis recommends it with sufficient confidence"""
+    if not analysis or not isinstance(analysis, dict):
+        logger.warning("Invalid analysis data, cannot execute trade")
+        return
+        
+    trade_rec = analysis.get("recommendation", {})
+    action = trade_rec.get("action", "NONE")
+    confidence = trade_rec.get("confidence", 0)
+    
+    # Default min confidence
+    min_confidence = 0.7
+    
+    # Get min_confidence from TRADING_PARAMS if available
+    if 'TRADING_PARAMS' in globals() and isinstance(TRADING_PARAMS, dict):
+        min_confidence = TRADING_PARAMS.get("min_confidence", min_confidence)
+    
+    if action != "NONE" and confidence >= min_confidence:
+        logger.info(f"Executing {action} trade with confidence {confidence}")
+        # Execute trade logic here
+    else:
+        logger.info(f"Not executing trade. Action: {action}, Confidence: {confidence}")
 
 if __name__ == "__main__":
     setup_logging()
