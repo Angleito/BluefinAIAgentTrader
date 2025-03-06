@@ -56,6 +56,8 @@ import requests
 import base64
 import aiohttp
 from anthropic import Client
+import re
+import tempfile
 
 # Load environment variables from .env file
 load_dotenv()
@@ -73,7 +75,7 @@ logger = logging.getLogger("bluefin_agent")
 
 # Try to import configuration, with fallbacks if not available
 try:
-    from config import TRADING_PARAMS, RISK_PARAMS, AI_PARAMS
+    from config import TRADING_PARAMS, RISK_PARAMS, AI_PARAMS, CLAUDE_CONFIG
 except ImportError:
     logger.warning("Could not import configuration from config.py, using defaults")
     
@@ -500,74 +502,77 @@ def opposite_type(order_type: str) -> str:
     """Get the opposite order type (BUY -> SELL, SELL -> BUY)"""
     return "BUY" if order_type == "SELL" else "SELL"
 
-async def analyze_tradingview_chart(symbol: str, timeframe: str) -> Dict[str, Any]:
-    """Analyze TradingView chart using Pyth data and VuManChu indicators."""
-    logger.info(f"Analyzing {symbol} {timeframe} chart on TradingView using Pyth data source")
+async def analyze_tradingview_chart(symbol, timeframe="1D"):
+    """Analyze a TradingView chart using AI"""
+    logger.info(f"Analyzing TradingView chart for {symbol} on {timeframe} timeframe")
     
-    # Set up browser with Playwright
-    async with async_playwright() as p:
-        browser = await p.chromium.launch()
-        page = await browser.new_page()
+    # Create temporary directory for screenshot
+    with tempfile.TemporaryDirectory() as tmpdir:
+        screenshot_path = os.path.join(tmpdir, f"{symbol}_{timeframe}_chart.png")
         
-        # Navigate to TradingView chart
-        url = f"https://www.tradingview.com/chart/"
-        await page.goto(url)
-        
-        # Wait for chart to load
-        await page.wait_for_selector(".chart-container", timeout=30000)
-        
-        # Click on symbol selector to change data source to Pyth
-        await page.click(".tv-symbol-select-container")
-        
-        # Type in the search box to find Pyth data source for the symbol
-        symbol_search = symbol.replace("/", "")  # Convert SUI/USD to SUIUSD for search
-        await page.fill(".js-search-input", f"PYTH:{symbol_search}")
-        
-        # Wait for search results and click on the correct Pyth source
-        await page.wait_for_selector(".symbol-search-item")
-        await page.click(f"text=PYTH:{symbol_search}")
-        
-        # Wait for chart to load with Pyth data
-        await page.wait_for_timeout(3000)
-        
-        # Change to Heikin Ashi candles
-        await page.click("#header-toolbar-chart-styles")
-        await page.click("text=Heikin Ashi")
-        
-        # Set timeframe
-        await page.click("#header-toolbar-intervals")
-        await page.click(f"text={timeframe}")
-        
-        # Add VuManChu Cipher A and B indicators
-        await page.click("#header-toolbar-indicators")
-        await page.fill("input", "VuManChu")
-        await page.click("text=VuManChu Cipher A")
-        await page.click("text=VuManChu Cipher B")
-        
-        # Wait for indicators to load
-        await page.wait_for_selector(".study", timeout=30000)
-        
-        # Create screenshots directory if it doesn't exist
-        os.makedirs("screenshots", exist_ok=True)
-        
-        # Take screenshot of chart with Pyth data
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        screenshot_path = f"screenshots/{symbol_search}_PYTH_{timeframe}_{timestamp}.png"
-        await page.screenshot(path=screenshot_path)
-        
-        # Setup webhook alert on TradingView for additional confirmation
-        # TODO: Implement webhook alert setup if needed
-        
-        await browser.close()
-        
-    # Return chart data
-    return {
-        "symbol": symbol,
-        "timeframe": timeframe,
-        "data_source": "PYTH",
-        "screenshot_path": screenshot_path,
-        "timestamp": datetime.now().isoformat()
-    }
+        try:
+            # Setup Playwright
+            async with async_playwright() as p:
+                # Launch browser
+                browser = await p.chromium.launch(headless=True)
+                page = await browser.new_page()
+                
+                # Navigate to TradingView
+                tradingview_url = f"https://www.tradingview.com/chart/?symbol={symbol}&interval={timeframe}"
+                logger.info(f"Navigating to {tradingview_url}")
+                await page.goto(tradingview_url)
+                
+                # Wait for chart to load
+                logger.info("Waiting for chart to load")
+                await page.wait_for_selector(".chart-markup-table", timeout=30000)
+                
+                # Additional wait for chart elements to render
+                await asyncio.sleep(5)
+                
+                # Take screenshot of chart
+                logger.info(f"Taking screenshot of {symbol} chart")
+                chart_element = await page.query_selector(".chart-markup-table")
+                if chart_element:
+                    await chart_element.screenshot(path=screenshot_path)
+                else:
+                    logger.error("Could not find chart element for screenshot")
+                    return None
+                
+                await browser.close()
+                
+                # Step 1: Primary analysis with Claude
+                logger.info(f"Using Claude to analyze {symbol} chart")
+                claude_analysis = await analyze_chart_with_claude(screenshot_path, symbol)
+                
+                if not claude_analysis:
+                    logger.error("Failed to get Claude analysis")
+                    return None
+                
+                # Step 2: Confirmation analysis with Perplexity
+                logger.info(f"Using Perplexity to confirm {symbol} chart analysis")
+                perplexity_analysis = analyze_chart_with_perplexity(screenshot_path, symbol)
+                
+                if not perplexity_analysis:
+                    logger.warning("Failed to get Perplexity confirmation, proceeding with Claude analysis only")
+                    return claude_analysis
+                
+                # Step 3: Combine analyses for final decision
+                combined_analysis = {
+                    "symbol": symbol,
+                    "timeframe": timeframe,
+                    "primary_analysis": claude_analysis,
+                    "confirmation_analysis": perplexity_analysis,
+                    "timestamp": datetime.now().isoformat()
+                }
+                
+                # Log analysis results
+                logger.info(f"Chart analysis complete for {symbol}")
+                
+                return combined_analysis
+                
+        except Exception as e:
+            logger.error(f"Error analyzing TradingView chart: {e}", exc_info=True)
+            return None
 
 async def get_perplexity_confirmation(symbol: str, position_type: str) -> bool:
     """Get trade confirmation from Perplexity API."""
@@ -630,223 +635,116 @@ async def open_position(symbol: str, side: str, size: float) -> Dict:
     return order
 
 # Initialize Claude client
-claude_client = Client(os.environ["ANTHROPIC_API_KEY"])
+try:
+    claude_client = Client(
+        api_key=CLAUDE_CONFIG["api_key"],
+        max_retries=3  # Increased from default 2 to handle rate limits better
+    )
+    logger.info("Initialized Claude client with config from config.py")
+except ImportError:
+    # Fallback to environment variables
+    claude_client = Client(os.environ["ANTHROPIC_API_KEY"], max_retries=3)
+    logger.info("Initialized Claude client from environment variables")
+except Exception as e:
+    logger.error(f"Failed to initialize Claude client: {e}")
+    claude_client = None
 
-async def main():
-    """
-    Main function to run AI analysis and execute trades.
-    
-    Required environment variables:
-    - For bluefin_client_sui:
-      - BLUEFIN_PRIVATE_KEY: Your private key for authentication
-    
-    - For bluefin.v2.client:
-      - BLUEFIN_API_KEY: Your API key
-      - BLUEFIN_API_SECRET: Your API secret
-      - BLUEFIN_API_URL: (Optional) Custom API URL
-    """
-    global perplexity_client
-    # global bluefin_client
-
-    load_dotenv()
-
-    setup_logging()
-    logger.info("Starting Perplexity Trader Agent")
-
-    perplexity_client = PerplexityClient(api_key=os.environ["PERPLEXITY_API_KEY"])
-    
-    # Remove the bluefin_client setup
-    # try:
-    #     bluefin_client = setup_bluefin_client()
-    # except Exception as e:
-    #     logger.error(f"Failed to set up Bluefin client: {e}")
-    #     sys.exit(1)
-
-    client = None
+def init_clients():
+    """Initialize all API clients"""
+    global bluefin_client, claude_client
     try:
-        # Initialize clients based on available libraries
-        if BLUEFIN_CLIENT_SUI_AVAILABLE:
-            # Use SUI client
-            private_key = os.getenv("BLUEFIN_PRIVATE_KEY")
-            if not private_key:
-                logger.error("BLUEFIN_PRIVATE_KEY not found in environment variables")
-                logger.error("Please add your private key to the .env file as BLUEFIN_PRIVATE_KEY=your_private_key_here")
-                logger.error("For security, never share your private key or commit it to version control")
-                return
-                
-            try:
-                network_str = os.getenv("BLUEFIN_NETWORK", "MAINNET")
-                if network_str not in ["MAINNET", "TESTNET"]:
-                    logger.error(f"Invalid network: {network_str}. Must be either 'MAINNET' or 'TESTNET'")
-                    return
-                    
-                if network_str == "MAINNET":
-                    logger.warning("Using MAINNET for trading. Ensure this is intentional and that you understand the risks.")
-                    
-                # Get the network from Networks enum if available, otherwise use default mapping
-                if Networks is not None and hasattr(Networks, network_str):
-                    network = getattr(Networks, network_str)
-                else:
-                    network = NETWORKS.get(network_str.lower(), "testnet")
-                
-                logger.info(f"Initializing Bluefin SUI client with network: {network_str}")
-                
-                if BluefinClient is not None:
-                    client = BluefinClient(private_key=private_key, network=network)
-                    await client.init()
-                    
-                    logger.info(f"Connecting to Bluefin network: {network_str}")
-                    connect_result = await client.connect()
-                    if connect_result:
-                        logger.info("Successfully connected to Bluefin")
-                    else:
-                        logger.error("Failed to connect to Bluefin")
-                        return
-                else:
-                    logger.error("BluefinClient class is not available")
-                    return
-            except Exception as e:
-                logger.error(f"Error initializing SUI client: {e}", exc_info=True)
-                return
-                
-        elif BLUEFIN_V2_CLIENT_AVAILABLE:
-            # Use V2 client
-            api_key = os.getenv("BLUEFIN_API_KEY")
-            api_secret = os.getenv("BLUEFIN_API_SECRET")
-            custom_api_url = os.getenv("BLUEFIN_API_URL")
-            
-            if not api_key or not api_secret:
-                logger.error("BLUEFIN_API_KEY and/or BLUEFIN_API_SECRET not found in environment variables")
-                logger.error("Please add your API credentials to the .env file")
-                logger.error("For security, never share your API credentials or commit them to version control")
-                return
-                
-            try:
-                network_str = os.getenv("BLUEFIN_NETWORK", "mainnet").lower()
-                if network_str not in ["mainnet", "testnet"]:
-                    logger.error(f"Invalid network: {network_str}. Must be either 'mainnet' or 'testnet'")
-                    return
-                    
-                if network_str == "mainnet":
-                    logger.warning("Using MAINNET for trading. Ensure this is intentional and that you understand the risks.")
-                
-                kwargs = {
-                    "api_key": api_key,
-                    "api_secret": api_secret,
-                    "network": network_str
-                }
-                
-                if custom_api_url:
-                    kwargs["api_url"] = custom_api_url
-                
-                logger.info(f"Initializing Bluefin v2 client with network: {network_str}")
-                
-                if BluefinClient is not None:
-                    client = BluefinClient(**kwargs)
-                    
-                    # V2 client might not have connect method, check if it exists
-                    if hasattr(client, 'connect'):
-                        logger.info("Connecting to Bluefin network")
-                        connect_result = await client.connect()
-                        if connect_result:
-                            logger.info("Successfully connected to Bluefin")
-                        else:
-                            logger.error("Failed to connect to Bluefin")
-                            return
-                    else:
-                        logger.info("No explicit connect method for v2 client, assuming connected")
-                else:
-                    logger.error("BluefinClient class is not available")
-                    return
-            except Exception as e:
-                logger.error(f"Error initializing v2 client: {e}", exc_info=True)
-                return
+        # Initialize Bluefin client
+        logger.info("Initializing Bluefin client")
+        if "BLUEFIN_API_KEY" in os.environ and "BLUEFIN_API_SECRET" in os.environ:
+            api_key = os.environ["BLUEFIN_API_KEY"]
+            api_secret = os.environ["BLUEFIN_API_SECRET"]
+            bluefin_client = BluefinClient(api_key, api_secret)
         else:
-            logger.error("No Bluefin client libraries available")
-            logger.error("Please install one of the following:")
-            logger.error("   pip install git+https://github.com/fireflyprotocol/bluefin-client-python-sui.git")
-            logger.error("   pip install git+https://github.com/fireflyprotocol/bluefin-v2-client-python.git")
+            logger.warning("Bluefin API credentials not found in environment variables")
+            bluefin_client = None
+        
+        # Initialize Claude client
+        logger.info("Initializing Claude client")
+        init_claude_client()
+        
+    except Exception as e:
+        logger.error(f"Error initializing clients: {e}", exc_info=True)
+        if not bluefin_client:
+            logger.warning("Failed to initialize Bluefin client")
+        if not claude_client:
+            logger.warning("Failed to initialize Claude client")
+
+def init_claude_client():
+    """Initialize the Claude API client using environment variables"""
+    global claude_client
+    
+    try:
+        # Check for API key in environment variables
+        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        
+        if not api_key or api_key == "your_api_key_here":
+            logger.warning("Claude API key not found or not set in environment variables")
+            claude_client = None
             return
         
-        # Initialize risk manager
-        risk_manager_instance = risk_manager
+        # Initialize Claude client with API key
+        logger.info("Initializing Claude client with Anthropic API key")
+        claude_client = Client(api_key=api_key)
         
-        # Create directories for storing results
-        os.makedirs("logs", exist_ok=True)
-        os.makedirs("screenshots", exist_ok=True)
-        os.makedirs("analysis", exist_ok=True)
+        # Log Claude rate limits from environment (for monitoring)
+        requests_per_minute = os.environ.get("CLAUDE_REQUESTS_PER_MINUTE", 50)
+        input_tokens_per_minute = os.environ.get("CLAUDE_INPUT_TOKENS_PER_MINUTE", 20000)
+        output_tokens_per_minute = os.environ.get("CLAUDE_OUTPUT_TOKENS_PER_MINUTE", 8000)
         
-        # Trading loop
-        while True:
-            try:
-                # Get account information
-                account_info = await get_account_info(client)
-                
-                # Analyze TradingView chart
-                analysis = await analyze_tradingview_chart(symbol, params["timeframe"])
-                
-                # Extract trade recommendation
-                trade_rec = extract_trade_recommendation(analysis)
-                
-                # Execute trade if appropriate
-                if trade_rec["action"] != "NONE" and trade_rec["confidence"] >= TRADING_PARAMS.get("min_confidence", 0.7):
-                    execution_result = await execute_trade(client, trade_rec, account_info)
-                    
-                    # Save the analysis and result
-                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    analysis_file = f"analysis/trade_analysis_{timestamp}.json"
-                    
-                    with open(analysis_file, "w") as f:
-                        json.dump({
-                            "timestamp": timestamp,
-                            "trade_recommendation": trade_rec,
-                            "execution_result": execution_result,
-                            "account_info": {
-                                "balance": account_info.get("balance", 0),
-                                "available_margin": account_info.get("available_margin", 0),
-                                "positions_count": len(account_info.get("positions", []))
-                            }
-                        }, f, indent=2)
-                        
-                    logger.info(f"Trade analysis saved to {analysis_file}")
-                    
-                    # Save screenshot if available
-                    if "screenshot_path" in analysis and analysis["screenshot_path"]:
-                        screenshot_file = f"screenshots/chart_{timestamp}.png"
-                        with open(screenshot_file, "wb") as f:
-                            f.write(open(analysis["screenshot_path"], "rb").read())
-                        logger.info(f"Chart screenshot saved to {screenshot_file}")
-                else:
-                    logger.info(f"No trade executed - action: {trade_rec['action']}, confidence: {trade_rec['confidence']}")
-                
-                # Wait for next analysis interval
-                wait_time = TRADING_PARAMS.get("analysis_interval_seconds", 300)  # Default 5 minutes
-                logger.info(f"Waiting {wait_time} seconds until next analysis")
-                await asyncio.sleep(wait_time)
-                
-            except Exception as e:
-                logger.error(f"Error in trading loop: {e}", exc_info=True)
-                # Wait a bit before retrying
-                await asyncio.sleep(30)
+        logger.info(f"Claude API rate limits: {requests_per_minute} requests/min, " 
+                    f"{input_tokens_per_minute} input tokens/min, "
+                    f"{output_tokens_per_minute} output tokens/min")
     
     except Exception as e:
-        logger.error(f"Unhandled error in main function: {e}", exc_info=True)
-    finally:
-        # Clean up resources
-        if client:
-            if hasattr(client, 'disconnect'):
-                try:
-                    logger.info("Disconnecting from Bluefin")
-                    await client.disconnect()
-                except Exception as e:
-                    logger.error(f"Error disconnecting from Bluefin: {e}", exc_info=True)
+        logger.error(f"Failed to initialize Claude client: {e}", exc_info=True)
+        claude_client = None
+
+async def main():
+    """Main function to run the trading agent"""
+    logger.info("Starting trading agent")
+    
+    # Initialize API clients
+    init_clients()
+    
+    # Check if Claude client is initialized
+    if not claude_client:
+        logger.error("Claude client not initialized, cannot proceed with trading analysis")
+        return
+    
+    # Load trading configuration
+    symbol = os.environ.get("DEFAULT_SYMBOL", "BTC/USD")
+    timeframe = os.environ.get("DEFAULT_TIMEFRAME", "1h")
+    
+    logger.info(f"Beginning trading analysis for {symbol} on {timeframe} timeframe")
+    
+    try:
+        # Analyze TradingView chart using Claude and Perplexity
+        chart_analysis = await analyze_tradingview_chart(symbol, timeframe)
+        
+        if not chart_analysis:
+            logger.error("Failed to analyze chart, aborting")
+            return
+        
+        # Log analysis results
+        logger.info(f"Chart analysis results: {json.dumps(chart_analysis, indent=2)}")
+        
+        # Execute trade if appropriate based on analysis
+        trade_result = await execute_trade_when_appropriate(chart_analysis)
+        
+        if trade_result:
+            logger.info(f"Trade executed: {trade_result}")
+        else:
+            logger.info("No trade executed")
             
-            if hasattr(client, 'api') and hasattr(client.api, 'close_session'):
-                try:
-                    logger.info("Closing API session")
-                    await client.api.close_session()
-                except Exception as e:
-                    logger.error(f"Error closing API session: {e}", exc_info=True)
+    except Exception as e:
+        logger.error(f"Error in main function: {e}", exc_info=True)
+    
+    logger.info("Trading agent run completed")
 
 def capture_chart_screenshot(ticker, timeframe="1D"):
     """Capture a screenshot of the TradingView chart for the given ticker and timeframe"""
@@ -903,6 +801,175 @@ def analyze_chart_with_perplexity(screenshot_path, ticker):
     else:
         logger.error(f"Error from Perplexity API: {response.status_code} - {response.text}")
         return None
+
+async def analyze_chart_with_claude(screenshot_path, ticker):
+    """
+    Analyze a chart screenshot using Claude AI
+    
+    Args:
+        screenshot_path: Path to the screenshot image
+        ticker: Symbol being analyzed
+        
+    Returns:
+        dict: Analysis results with trading recommendations
+    """
+    global claude_client
+    
+    if not claude_client:
+        logger.error("Claude client not initialized, cannot analyze chart")
+        return None
+        
+    try:
+        # Load config settings
+        try:
+            from config import CLAUDE_CONFIG
+            max_tokens = CLAUDE_CONFIG.get("max_tokens", 8000)
+            model = CLAUDE_CONFIG.get("model", "claude-3.7-sonnet")
+            temperature = CLAUDE_CONFIG.get("temperature", 0.2)
+        except ImportError:
+            logger.warning("Could not import CLAUDE_CONFIG, using defaults")
+            max_tokens = int(os.getenv("CLAUDE_MAX_TOKENS", 8000))
+            model = os.getenv("CLAUDE_MODEL", "claude-3.7-sonnet")
+            temperature = float(os.getenv("CLAUDE_TEMPERATURE", 0.2))
+        
+        # Convert image to base64 for transmission
+        with open(screenshot_path, "rb") as image_file:
+            encoded_image = base64.b64encode(image_file.read()).decode('utf-8')
+        
+        # Construct system prompt
+        system_prompt = f"""You are an expert cryptocurrency trader and technical analyst. 
+You are analyzing a trading chart for {ticker} to make trading decisions.
+Analyze the chart thoroughly and provide:
+1. Key technical indicators visible on the chart
+2. Support and resistance levels
+3. Current market trend (bullish, bearish, or neutral)
+4. Trading recommendation (BUY, SELL, or HOLD) with specific entry, stop loss, and take profit levels
+5. Confidence score (1-10) for your recommendation
+6. Risk/reward ratio for the recommended trade
+
+Format your analysis in a structured way with clear sections."""
+        
+        # Make API call to Claude
+        logger.info(f"Sending chart analysis request to Claude for {ticker}")
+        
+        # Create message with anthropic.Client - using correct schema
+        response = claude_client.messages.create(
+            model=model,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            system=system_prompt,
+            messages=[
+                {
+                    "role": "user", 
+                    "content": [
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": "image/png",
+                                "data": encoded_image
+                            }
+                        },
+                        {
+                            "type": "text",
+                            "text": f"Analyze this {ticker} chart and provide a detailed trading recommendation."
+                        }
+                    ]
+                }
+            ]
+        )
+        
+        # Extract and return results - handling response structure correctly
+        analysis_text = ""
+        for content_block in response.content:
+            if content_block.type == "text":
+                analysis_text = content_block.text
+                break
+        
+        # Parse the analysis to extract trading recommendation
+        recommendation = parse_claude_analysis(analysis_text, ticker)
+        
+        logger.info(f"Claude analysis completed for {ticker}")
+        return {
+            "raw_analysis": analysis_text,
+            "recommendation": recommendation
+        }
+        
+    except Exception as e:
+        logger.error(f"Error analyzing chart with Claude: {e}", exc_info=True)
+        return None
+
+def parse_claude_analysis(analysis_text, ticker):
+    """
+    Parse Claude's analysis to extract trading recommendations
+    
+    Args:
+        analysis_text: Raw analysis text from Claude
+        ticker: Symbol being analyzed
+        
+    Returns:
+        dict: Structured trading recommendation
+    """
+    # Default values
+    recommendation = {
+        "symbol": ticker,
+        "action": "NONE",  # Default to no action
+        "entry_price": None,
+        "stop_loss": None,
+        "take_profit": None,
+        "confidence": 0,  # 0-10 scale
+        "risk_reward_ratio": 0,
+        "trend": "NEUTRAL"
+    }
+    
+    try:
+        # Extract action (BUY/SELL/HOLD)
+        if "BUY" in analysis_text.upper() or "LONG" in analysis_text.upper():
+            recommendation["action"] = "BUY"
+        elif "SELL" in analysis_text.upper() or "SHORT" in analysis_text.upper():
+            recommendation["action"] = "SELL"
+        elif "HOLD" in analysis_text.upper() or "NEUTRAL" in analysis_text.upper():
+            recommendation["action"] = "NONE"
+            
+        # Extract trend
+        if "BULLISH" in analysis_text.upper():
+            recommendation["trend"] = "BULLISH"
+        elif "BEARISH" in analysis_text.upper():
+            recommendation["trend"] = "BEARISH"
+            
+        # Extract confidence score (1-10)
+        confidence_match = re.search(r"confidence[:\s]+(\d+)(?:\s*\/\s*10)?", analysis_text.lower())
+        if confidence_match:
+            recommendation["confidence"] = int(confidence_match.group(1))
+            
+        # Extract price levels (using regex)
+        # Entry price
+        entry_match = re.search(r"entry[:\s]+[$]?(\d+(?:\.\d+)?)", analysis_text.lower())
+        if entry_match:
+            recommendation["entry_price"] = float(entry_match.group(1))
+            
+        # Stop loss
+        sl_match = re.search(r"stop[:\s]*loss[:\s]+[$]?(\d+(?:\.\d+)?)", analysis_text.lower())
+        if sl_match:
+            recommendation["stop_loss"] = float(sl_match.group(1))
+            
+        # Take profit
+        tp_match = re.search(r"take[:\s]*profit[:\s]+[$]?(\d+(?:\.\d+)?)", analysis_text.lower())
+        if tp_match:
+            recommendation["take_profit"] = float(tp_match.group(1))
+            
+        # Risk/reward ratio
+        rr_match = re.search(r"risk[:/]reward[:\s]+(\d+(?:\.\d+)?)[:\s]*(?:to)[:\s]*(\d+(?:\.\d+)?)", analysis_text.lower())
+        if rr_match:
+            reward = float(rr_match.group(2))
+            risk = float(rr_match.group(1))
+            if risk > 0:
+                recommendation["risk_reward_ratio"] = reward / risk
+                
+    except Exception as e:
+        logger.error(f"Error parsing Claude analysis: {e}")
+        
+    return recommendation
 
 async def execute_trade_when_appropriate(analysis):
     """Execute a trade if the analysis recommends it with sufficient confidence"""
