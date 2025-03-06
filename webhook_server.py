@@ -38,9 +38,6 @@ os.makedirs("logs", exist_ok=True)
 
 app = Flask(__name__)
 
-# Optional security key for TradingView
-TV_WEBHOOK_SECRET = os.getenv("TV_WEBHOOK_SECRET", "")
-
 # Valid VuManChu Cipher B signal types with explicit Bullish/Bearish tags
 VALID_SIGNAL_TYPES = [
     "GREEN_CIRCLE",   # Bullish: Wavetrend waves at oversold level and crossed up
@@ -97,7 +94,6 @@ def tradingview_webhook():
     
     Expected format:
     {
-        "passphrase": "your_secret_key",  # Optional security
         "indicator": "vmanchu_cipher_b",
         "symbol": "SUI/USD",
         "timeframe": "5m",
@@ -108,16 +104,17 @@ def tradingview_webhook():
     """
     try:
         # Get the request data
+        if not request.is_json:
+            logger.warning("Received non-JSON request")
+            return jsonify({"status": "error", "message": "Request must be JSON"}), 400
+            
         data = request.json
+        if not data:
+            logger.warning("Received empty JSON request")
+            return jsonify({"status": "error", "message": "Empty JSON request"}), 400
         
         # Log the received webhook
         logger.info(f"Received webhook: {json.dumps(data)}")
-        
-        # Verify passphrase if set
-        if TV_WEBHOOK_SECRET:
-            if "passphrase" not in data or data["passphrase"] != TV_WEBHOOK_SECRET:
-                logger.warning("Invalid passphrase in webhook")
-                return jsonify({"status": "error", "message": "Invalid passphrase"}), 401
         
         # Validate required fields
         required_fields = ["indicator", "symbol", "timeframe", "action", "signal_type"]

@@ -54,7 +54,7 @@ if __name__ == '__main__':
 
 Instead of using ngrok, you can leverage Docker to make your server publicly accessible.
 
-### Option 1: Docker Container with Port Publishing
+### Docker Container with Port Publishing
 
 The simplest approach is to use Docker's port publishing feature to expose your Flask application:
 
@@ -84,126 +84,7 @@ docker run -d -p 80:5000 trading-ai-agent
 ```
 
 
-### Option 2: Nginx Reverse Proxy with Docker
 
-For enhanced security and flexibility, implement an Nginx reverse proxy in front of your Python application using Docker Compose:
-
-```yaml
-# docker-compose.yml
-version: '3'
-
-services:
-  app:
-    build: .
-    expose:
-      - 5000
-    networks:
-      - web_network
-
-  nginx:
-    image: nginx:latest
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx.conf:/etc/nginx/conf.d/default.conf
-      - ./ssl:/etc/nginx/ssl
-    depends_on:
-      - app
-    networks:
-      - web_network
-
-networks:
-  web_network:
-    driver: bridge
-```
-
-```
-# nginx.conf
-server {
-    listen 80;
-    server_name your-domain.com;
-
-    location / {
-        proxy_pass http://app:5000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
-}
-```
-
-
-### Option 3: Self-Hosted Tunneling Solutions
-
-If you need a more temporary solution, consider these alternatives to ngrok:
-
-#### FRP (Fast Reverse Proxy)
-
-FRP is a lightweight tool that helps expose local servers to the internet:
-
-```yaml
-# docker-compose.yml for frp
-version: '3'
-
-services:
-  frps:
-    image: snowdreamtech/frps
-    ports:
-      - "7000:7000"  # frp server port
-      - "80:80"      # http port
-    volumes:
-      - ./frps.ini:/etc/frp/frps.ini
-```
-
-```ini
-# frps.ini (on public server)
-[common]
-bind_port = 7000
-```
-
-```ini
-# frpc.ini (on your local machine)
-[common]
-server_addr = your-public-server-ip
-server_port = 7000
-
-[web]
-type = http
-local_port = 5000
-custom_domains = your-domain.com
-```
-
-
-#### Docker-Tunnel
-
-Another self-hosted alternative specifically designed as an ngrok replacement:
-
-```bash
-# On your public server
-docker run -d -p 80:80 -p 443:443 vitobotta/docker-tunnel:latest
-
-# On your local machine
-docker run -d vitobotta/docker-tunnel-client:latest \
-  -server your-public-server-ip \
-  -target localhost:5000 \
-  -subdomain trading-ai
-```
-
-
-### Option 4: uWSGI-Nginx-Flask Docker Image
-
-A production-ready solution for deploying Flask applications:
-
-```dockerfile
-FROM tiangolo/uwsgi-nginx-flask:python3.9
-
-# Install Playwright and dependencies
-RUN pip install playwright requests
-RUN playwright install chromium
-RUN playwright install-deps
-
-COPY ./app /app
-```
 
 
 ## Implementing Playwright for Automated Chart Analysis

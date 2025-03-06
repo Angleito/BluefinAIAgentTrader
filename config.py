@@ -68,9 +68,14 @@ BLUEFIN_CONFIG = {
 # Claude configuration
 CLAUDE_CONFIG = {
     "api_key": os.getenv("ANTHROPIC_API_KEY"),
-    "model": "claude-3.7-sonnet",
-    "temperature": 0.2,
-    "max_tokens": 500
+    "model": os.getenv("CLAUDE_MODEL", "claude-3.7-sonnet"),
+    "temperature": float(os.getenv("CLAUDE_TEMPERATURE", 0.2)),
+    "max_tokens": int(os.getenv("CLAUDE_MAX_TOKENS", 8000)),
+    "rate_limits": {
+        "requests_per_minute": int(os.getenv("CLAUDE_REQUESTS_PER_MINUTE", 50)),
+        "input_tokens_per_minute": int(os.getenv("CLAUDE_INPUT_TOKENS_PER_MINUTE", 20000)),
+        "output_tokens_per_minute": int(os.getenv("CLAUDE_OUTPUT_TOKENS_PER_MINUTE", 8000))
+    }
 }
 
 # Perplexity configuration
