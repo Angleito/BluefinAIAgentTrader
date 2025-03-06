@@ -2,17 +2,30 @@ import os
 
 # Trading parameters
 TRADING_PARAMS = {
-    "position_size_percentage": 0.05,  # 5% of portfolio
-    "leverage": 7,                     # 7x leverage
-    "stop_loss_percentage": 0.15,      # 15% stop loss
-    "max_concurrent_positions": 3,     # Max 3 positions
-    "trading_pairs": ["BTC/USD", "ETH/USD", "SOL/USD", "SUI/USD"],  # Initial trading pairs
-    "initial_account_balance": 10000,  # Initial account balance
-    "max_risk_per_trade": 0.02,        # Maximum risk per trade (2% of account balance)
-    "max_risk_per_symbol": 0.05,       # Maximum risk per symbol (5% of account balance)
-    "max_daily_drawdown": 0.05,        # Maximum daily drawdown (5% of account balance)
-    "risk_reward_ratio": 2.0,          # Target risk-reward ratio
-    "atr_multiplier": 2.0,             # ATR multiplier for stop loss calculation
+    # Account and risk settings
+    "initial_account_balance": 10000,  # Initial account balance for risk calculations
+    "max_risk_per_trade": 0.02,        # Maximum risk per trade (2% of account)
+    "max_concurrent_positions": 3,     # Maximum number of open positions
+    "max_daily_drawdown": 0.05,        # Maximum daily drawdown (5% of account)
+    
+    # Default stop loss/take profit settings if not provided in analysis
+    "stop_loss_percentage": 0.02,      # Default stop loss (2% from entry)
+    "take_profit_percentage": 0.04,    # Default take profit (4% from entry)
+    
+    # Trading confidence threshold
+    "min_confidence_threshold": 7,     # Minimum confidence score to execute a trade (out of 10)
+    
+    # TradingView chart settings
+    "chart_timeframe": "5",            # Chart timeframe in minutes
+    "chart_symbol": "PYTH:SUIUSD",     # Trading symbol
+    "chart_indicators": [
+        "VuManChu Cipher A",
+        "VuManChu Cipher B"
+    ],
+    "chart_candle_type": "Heikin Ashi",
+    
+    # Trading monitoring
+    "analysis_interval": 300,          # Time between analyses in seconds (5 minutes)
 }
 
 # Risk management configuration
@@ -89,4 +102,11 @@ LOGGING_CONFIG = {
             "propagate": True
         },
     }
+}
+
+# Bluefin API default settings
+BLUEFIN_DEFAULTS = {
+    "network": "MAINNET",              # Use "TESTNET" or "MAINNET"
+    "leverage": 5,                     # Default leverage if not specified
+    "default_symbol": "BTC-PERP",      # Default trading symbol
 } 
