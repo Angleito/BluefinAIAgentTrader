@@ -45,12 +45,16 @@ import asyncio
 import random
 import logging
 import traceback
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 import backoff
 from dotenv import load_dotenv
 from playwright.async_api import async_playwright
+from playwright.sync_api import sync_playwright
 from typing import Dict, List, Optional, Union, Any, TypeVar, Type, cast
+import requests
+import base64
+import aiohttp
 
 # Load environment variables from .env file
 load_dotenv()
@@ -557,6 +561,23 @@ async def main():
       - BLUEFIN_API_SECRET: Your API secret
       - BLUEFIN_API_URL: (Optional) Custom API URL
     """
+    global perplexity_client
+    # global bluefin_client
+
+    load_dotenv()
+
+    setup_logging()
+    logger.info("Starting Perplexity Trader Agent")
+
+    perplexity_client = PerplexityClient(api_key=os.environ["PERPLEXITY_API_KEY"])
+    
+    # Remove the bluefin_client setup
+    # try:
+    #     bluefin_client = setup_bluefin_client()
+    # except Exception as e:
+    #     logger.error(f"Failed to set up Bluefin client: {e}")
+    #     sys.exit(1)
+
     client = None
     try:
         # Initialize clients based on available libraries
@@ -742,6 +763,54 @@ async def main():
                     await client.api.close_session()
                 except Exception as e:
                     logger.error(f"Error closing API session: {e}", exc_info=True)
+
+def capture_chart_screenshot(ticker, timeframe="1D"):
+    """Capture a screenshot of the TradingView chart for the given ticker and timeframe"""
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page()
+        
+        # Navigate to TradingView chart for the specified ticker
+        page.goto(f"https://www.tradingview.com/chart/?symbol={ticker}")
+        
+        # Wait for chart to load completely
+        page.wait_for_selector(".chart-container")
+        
+        # Capture screenshot
+        screenshot_path = f"./screenshots/{ticker}_{timeframe}_{get_timestamp()}.png"
+        page.screenshot(path=screenshot_path)
+        browser.close()
+        
+        return screenshot_path
+
+def analyze_chart_with_perplexity(screenshot_path, ticker):
+    """Analyze a chart screenshot using Perplexity AI"""
+    # Convert image to base64 for transmission
+    with open(screenshot_path, "rb") as image_file:
+        encoded_image = base64.b64encode(image_file.read()).decode('utf-8')
+    
+    # Construct prompt with image and context
+    prompt = {
+        "model": "sonar-reasoning",  # Using the deep seek R1 model
+        "messages": [
+            {
+                "role": "user",
+                "content": f"Analyze this trading chart for {ticker}. What are the key technical indicators, support/resistance levels, and potential trade setups?",
+                "images": [encoded_image]
+            }
+        ]
+    }
+    
+    # Send to Perplexity API
+    response = requests.post("https://api.perplexity.ai/analyze", json=prompt)
+    
+    # Process response
+    if response.status_code == 200:
+        analysis = response.json()
+        return analysis
+    else:
+        logger.error(f"Error from Perplexity API: {response.status_code} - {response.text}")
+        return None
 
 if __name__ == "__main__":
     setup_logging()

@@ -10,7 +10,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Playwright browsers
-RUN pip install playwright && python -m playwright install chromium
+RUN pip install playwright && playwright install chromium
 
 # Copy requirements first for better cache
 COPY requirements.txt .

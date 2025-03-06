@@ -134,6 +134,45 @@ def mock_analysis():
         logger.error(f"Error processing mock analysis: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    """Receive TradingView webhook alert and trigger trading workflow"""
+    try:
+        data = request.json
+        logger.info(f"Received TradingView alert: {data}")
+        
+        # Extract relevant alert data
+        ticker = data.get('ticker')
+        price = data.get('price')
+        timeframe = data.get('timeframe')
+        
+        # Trigger trading workflow
+        trading_workflow(ticker, price, timeframe)
+        
+        return jsonify({"status": "success", "message": "Alert processed"}), 200
+    except Exception as e:
+        logger.error(f"Error processing webhook: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+def trading_workflow(ticker, price, timeframe):
+    """Main trading workflow triggered by TradingView alert"""
+    try:
+        logger.info(f"Starting trading workflow for {ticker} at {price} on {timeframe}")
+        
+        # Capture chart screenshot with Playwright
+        screenshot_path = capture_chart_screenshot(ticker, timeframe)
+        
+        # Analyze chart with Perplexity AI
+        analysis = analyze_chart_with_perplexity(screenshot_path, ticker)
+        
+        # Generate and save trading report
+        report = generate_trading_report(ticker, price, timeframe, analysis)
+        save_report(report)
+        
+        logger.info(f"Trading workflow completed for {ticker}")
+    except Exception as e:
+        logger.error(f"Error in trading workflow: {e}")
+
 if __name__ == '__main__':
     # In production, use Gunicorn instead of the Flask development server
     port = int(os.environ.get('PORT', 5000))
