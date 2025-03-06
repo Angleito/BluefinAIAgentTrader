@@ -7,16 +7,7 @@ from core.performance_tracker import performance_tracker
 logger = logging.getLogger(__name__)
 
 async def execute_trade(client: BluefinClient, signal: dict):
-    """
-    Execute a trade on Bluefin based on the signal.
-    
-    Args:
-        client: The Bluefin API client
-        signal: The processed trading signal
-        
-    Returns:
-        dict: The executed trade details
-    """
+    """Execute a trade on Bluefin based on the signal."""
     symbol = signal["symbol"]
     trade_type = signal["type"]
     entry_price = signal["entry_price"]
@@ -36,20 +27,12 @@ async def execute_trade(client: BluefinClient, signal: dict):
         return None
     
     # Open position
-    if trade_type == "buy":
-        order = await client.create_market_order(
-            symbol=symbol,
-            side="buy",
-            quantity=adjusted_size,
-            reduce_only=False
-        )
-    else:  # sell
-        order = await client.create_market_order(
-            symbol=symbol,
-            side="sell", 
-            quantity=adjusted_size,
-            reduce_only=False
-        )
+    order = await client.create_market_order(
+        symbol=symbol,
+        side="buy" if trade_type == "buy" else "sell",
+        quantity=adjusted_size,
+        reduce_only=False
+    )
     
     if "id" not in order:
         logger.error(f"Failed to open position: {order}")
@@ -85,4 +68,4 @@ async def execute_trade(client: BluefinClient, signal: dict):
     
     performance_tracker.log_trade_entry(trade)
     
-    return trade 
+    return trade
