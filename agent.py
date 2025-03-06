@@ -369,430 +369,180 @@ async def get_account_info(client):
         # Re-raise the exception to trigger the retry mechanism
         raise
 
-async def analyze_tradingview_chart() -> Dict[str, Any]:
-    """
-    Analyze TradingView chart by taking a screenshot and using AI to interpret it.
-    
-    Returns:
-        Dict containing analysis results and metadata
-    """
-    symbol = TRADING_PARAMS.get("chart_symbol", "BTCUSDT")
-    timeframe = TRADING_PARAMS.get("timeframe", "1h")
-    indicators = TRADING_PARAMS.get("indicators", ["MACD", "RSI", "Bollinger Bands"])
-    candle_type = TRADING_PARAMS.get("candle_type", "Heikin Ashi")
-    
-    logger.info(f"Starting chart analysis for {symbol} on {timeframe} timeframe")
-    
-    # Create screenshots directory if it doesn't exist
-    os.makedirs("screenshots", exist_ok=True)
-    
-    screenshot = None
-    try:
-        # Import Playwright only when needed
-        from playwright.async_api import async_playwright
-        
-        # Launch browser
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
-            context = await browser.new_context()
-            page = await context.new_page()
-            
-            # Navigate to TradingView in advanced chart mode
-            tradingview_url = f"https://www.tradingview.com/chart/?symbol={symbol}"
-            logger.info(f"Opening TradingView: {tradingview_url}")
-            await page.goto(tradingview_url)
-            
-            # Wait for chart to load
-            await page.wait_for_selector(".chart-container", state="visible", timeout=30000)
-            logger.info("Chart loaded successfully")
-            
-            # Set timeframe if specified
-            if timeframe:
-                logger.info(f"Setting timeframe to {timeframe}")
-                await page.click(".button-3_SlRy")  # Timeframe button
-                await page.wait_for_selector(".menuBox-g78rwseM", state="visible")
-                
-                # Find and click the appropriate timeframe
-                timeframe_selector = f"[data-value='{timeframe}']"
-                await page.click(timeframe_selector)
-                await page.wait_for_timeout(1000)  # Short wait for timeframe to apply
-            
-            # Add indicators if specified
-            for indicator in indicators:
-                logger.info(f"Adding indicator: {indicator}")
-                await page.click("#header-toolbar-indicators")
-                await page.wait_for_selector(".search-ZXzPWcCf", state="visible")
-                await page.fill(".search-ZXzPWcCf", indicator)
-                await page.wait_for_timeout(500)
-                await page.click(".container-VpBYJEEr.container-VpBYJEEr-with-text")
-                await page.wait_for_timeout(1000)  # Wait for indicator to be added
-            
-            # Set candle type if specified
-            if candle_type != "Regular":
-                logger.info(f"Setting candle type to {candle_type}")
-                await page.click("#header-toolbar-chart-styles")
-                await page.wait_for_selector(".menu-SfBLKmDc", state="visible")
-                
-                # Select Heikin Ashi from dropdown
-                candle_selectors = {
-                    "Heikin Ashi": "Heikin Ashi",
-                    "Hollow": "Hollow Candles",
-                    "Bar": "Bars",
-                    "Line": "Line",
-                }
-                
-                candle_option = candle_selectors.get(candle_type, candle_type)
-                candle_xpath = f"//span[contains(text(), '{candle_option}')]"
-                await page.click(candle_xpath)
-                await page.wait_for_timeout(1000)  # Wait for candle type to apply
-            
-            # Wait a moment for all changes to apply
-            logger.info("Waiting for chart to stabilize before taking screenshot")
-            await page.wait_for_timeout(5000)
-            
-            # Generate a timestamp-based filename for the screenshot
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            screenshot_path = f"screenshots/{symbol}_{timeframe}_{timestamp}.png"
-            
-            # Take screenshot
-            logger.info(f"Taking screenshot of the chart and saving to {screenshot_path}")
-            await page.screenshot(path=screenshot_path)
-            
-            # Close browser
-            await browser.close()
-            
-        if os.path.exists(screenshot_path) and AI_PARAMS.get("use_perplexity", True):
-            logger.info("Using Perplexity API for chart analysis")
-            try:
-                # Import the PerplexityClient
-                from core.perplexity_client import get_perplexity_client
-                
-                # Get client instance
-                perplexity_client = get_perplexity_client()
-                
-                # Create analysis prompt
-                analysis_prompt = """
-                Analyze this TradingView chart with technical indicators and patterns.
-                
-                Focus on:
-                1. The current trend direction based on candle patterns
-                2. Key technical indicators visible on the chart
-                3. Important support and resistance levels
-                4. Volume patterns if visible
-                5. Any significant chart patterns (head & shoulders, double tops, etc.)
-                
-                Determine if this is a valid trading signal. Provide:
-                - Clear BUY, SELL, or HOLD recommendation
-                - Confidence level (0.0-1.0)
-                - Approximate entry price if applicable
-                - Suggested stop loss level
-                - Take profit target
-                - Key reasoning for your recommendation
-                """
-                
-                # Analyze chart with Perplexity
-                perplexity_result = perplexity_client.analyze_chart(screenshot_path, analysis_prompt)
-                
-                # Extract structured trading recommendation
-                recommendation = perplexity_client.extract_trading_recommendation(perplexity_result)
-                
-                logger.info(f"Perplexity analysis complete: {recommendation['action']} with confidence {recommendation['confidence']}")
-                
-                # Return combined results
-                return {
-                    "timestamp": datetime.now().isoformat(),
-                    "symbol": symbol,
-                    "timeframe": timeframe,
-                    "screenshot_path": screenshot_path,
-                    "indicators_used": indicators,
-                    "candle_type": candle_type,
-                    "perplexity_analysis": recommendation,
-                    "full_response": perplexity_result
-                }
-            except ImportError:
-                logger.warning("PerplexityClient not found, skipping AI analysis")
-            except Exception as e:
-                logger.error(f"Error in Perplexity analysis: {e}", exc_info=True)
-        
-        # Return basic analysis if Perplexity failed or isn't enabled
-        logger.info("Chart analysis completed with screenshot only")
-        return {
-            "timestamp": datetime.now().isoformat(),
-            "symbol": symbol,
-            "timeframe": timeframe,
-            "screenshot_path": screenshot_path,
-            "indicators_used": indicators,
-            "candle_type": candle_type
-        }
-        
-    except Exception as e:
-        logger.error(f"Error analyzing TradingView chart: {e}", exc_info=True)
-        return {
-            "timestamp": datetime.now().isoformat(),
-            "symbol": symbol,
-            "timeframe": timeframe,
-            "error": str(e)
-        }
+# Default trading parameters
+DEFAULT_PARAMS = {
+    "symbol": "SUI/USD",
+    "timeframe": "5m", 
+    "leverage": 7,
+    "stop_loss_pct": 0.15,
+    "position_size_pct": 0.05,
+    "max_positions": 3
+}
 
-def extract_trade_recommendation(analysis: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Extract a structured trade recommendation from the chart analysis.
-    
-    Args:
-        analysis: Chart analysis data including Perplexity results if available
-        
-    Returns:
-        Dict with trade recommendation details
-    """
-    # Default recommendation
-    recommendation = {
-        "action": "NONE",  # NONE, BUY, SELL
-        "confidence": 0.0,
-        "entry_price": 0.0,
-        "stop_loss": 0.0,
-        "take_profit": 0.0,
-        "reason": "No analysis available"
+# Symbol-specific parameters (can be overridden by user)
+SYMBOL_PARAMS = {
+    "SUI/USD": DEFAULT_PARAMS,
+    "BTC/USD": {
+        "symbol": "BTC/USD",
+        "timeframe": "15m",
+        "leverage": 10,
+        "stop_loss_pct": 0.1,
+        "position_size_pct": 0.03,
+        "max_positions": 2
+    },
+    "ETH/USD": {
+        "symbol": "ETH/USD", 
+        "timeframe": "15m",
+        "leverage": 8,
+        "stop_loss_pct": 0.12,
+        "position_size_pct": 0.04,
+        "max_positions": 2
     }
-    
-    # Check if we have Perplexity analysis
-    if "perplexity_analysis" in analysis:
-        perplexity_result = analysis["perplexity_analysis"]
-        
-        # Use Perplexity's analysis result
-        recommendation["action"] = perplexity_result.get("action", "NONE")
-        recommendation["confidence"] = perplexity_result.get("confidence", 0.0)
-        recommendation["reason"] = perplexity_result.get("rationale", "No clear analysis provided")
-        
-        # Extract price levels if available
-        entry_price = perplexity_result.get("entry_price")
-        if entry_price is not None:
-            recommendation["entry_price"] = entry_price
-            
-        stop_loss = perplexity_result.get("stop_loss")
-        if stop_loss is not None:
-            recommendation["stop_loss"] = stop_loss
-            
-        take_profit = perplexity_result.get("take_profit")
-        if take_profit is not None:
-            recommendation["take_profit"] = take_profit
-            
-        # If we have entry price but no stop loss or take profit, calculate them
-        if recommendation["entry_price"] > 0 and recommendation["stop_loss"] <= 0:
-            stop_loss_pct = TRADING_PARAMS.get("stop_loss_percentage", 0.02)  # 2% default
-            take_profit_multiplier = TRADING_PARAMS.get("take_profit_multiplier", 2)  # 2x risk
-            
-            if recommendation["action"] == "BUY":
-                recommendation["stop_loss"] = recommendation["entry_price"] * (1 - stop_loss_pct)
-                risk = recommendation["entry_price"] - recommendation["stop_loss"]
-                recommendation["take_profit"] = recommendation["entry_price"] + (risk * take_profit_multiplier)
-            elif recommendation["action"] == "SELL":
-                recommendation["stop_loss"] = recommendation["entry_price"] * (1 + stop_loss_pct)
-                risk = recommendation["stop_loss"] - recommendation["entry_price"]
-                recommendation["take_profit"] = recommendation["entry_price"] - (risk * take_profit_multiplier)
-                
-        logger.info(f"Extracted trade recommendation from Perplexity: {recommendation['action']} with confidence {recommendation['confidence']}")
-        return recommendation
-    
-    # Fallback to basic recommendation if no Perplexity analysis
-    # This is a simplified algorithm as fallback
-    logger.info("No Perplexity analysis available, using fallback recommendation")
-    return recommendation
+}
 
-@backoff.on_exception(backoff.expo, 
-                     (asyncio.TimeoutError, ConnectionError),
-                     max_tries=3,
-                     max_time=30)
-async def execute_trade(client, trade_rec, account_info):
-    """
-    Execute a trade based on the recommendation and account information.
+# Initialize Bluefin client
+client = None
+if BLUEFIN_CLIENT_SUI_AVAILABLE:
+    client = BluefinClient(private_key=os.getenv("BLUEFIN_PRIVATE_KEY"), network=Networks.MAINNET)
+elif BLUEFIN_V2_CLIENT_AVAILABLE:
+    client = BluefinClient(api_key=os.getenv("BLUEFIN_API_KEY"), api_secret=os.getenv("BLUEFIN_API_SECRET"))
+else:
+    logger.warning("No Bluefin client available, running in simulation mode")
+
+from core.perplexity_client import get_perplexity_client
+
+def opposite_type(order_type: str) -> str:
+    """Get the opposite order type (BUY -> SELL, SELL -> BUY)"""
+    return "BUY" if order_type == "SELL" else "SELL"
+
+async def analyze_tradingview_chart(symbol: str, timeframe: str) -> Dict[str, Any]:
+    """Analyze TradingView chart using Pyth data and VuManChu indicators."""
+    logger.info(f"Analyzing {symbol} {timeframe} chart on TradingView using Pyth data source")
     
-    Args:
-        client: The Bluefin client (SUI or v2)
-        trade_rec: Dictionary with trade recommendation details
-        account_info: Dictionary with account information
+    # Set up browser with Playwright
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        page = await browser.new_page()
         
-    Returns:
-        Dictionary with execution results
-    """
-    if not client:
-        logger.error("Cannot execute trade: client not initialized")
-        return {"success": False, "error": "Client not initialized"}
+        # Navigate to TradingView chart
+        url = f"https://www.tradingview.com/chart/"
+        await page.goto(url)
         
-    if not trade_rec:
-        logger.error("Cannot execute trade: invalid trade recommendation")
-        return {"success": False, "error": "Invalid trade recommendation"}
+        # Wait for chart to load
+        await page.wait_for_selector(".chart-container", timeout=30000)
         
-    if trade_rec["action"] == "NONE" or trade_rec["confidence"] < TRADING_PARAMS.get("min_confidence", 0.7):
-        logger.info(f"Trade not executed due to low confidence or NONE action: {trade_rec}")
-        return {"success": False, "reason": "Low confidence or NONE action"}
+        # Click on symbol selector to change data source to Pyth
+        await page.click(".tv-symbol-select-container")
         
-    try:
-        # Extract parameters from trade_rec
-        symbol = trade_rec["symbol"]
-        action = trade_rec["action"]  # BUY or SELL
-        entry_price = trade_rec["entry_price"]
-        stop_loss = trade_rec["stop_loss"]
-        take_profit = trade_rec["take_profit"]
+        # Type in the search box to find Pyth data source for the symbol
+        symbol_search = symbol.replace("/", "")  # Convert SUI/USD to SUIUSD for search
+        await page.fill(".js-search-input", f"PYTH:{symbol_search}")
         
-        # Get account balance and leverage
-        balance = account_info.get("balance", 0)
-        leverage = TRADING_PARAMS.get("leverage", 3)
+        # Wait for search results and click on the correct Pyth source
+        await page.wait_for_selector(".symbol-search-item")
+        await page.click(f"text=PYTH:{symbol_search}")
         
-        if balance <= 0:
-            logger.error(f"Invalid account balance: {balance}")
-            return {"success": False, "error": "Invalid account balance"}
+        # Wait for chart to load with Pyth data
+        await page.wait_for_timeout(3000)
+        
+        # Change to Heikin Ashi candles
+        await page.click("#header-toolbar-chart-styles")
+        await page.click("text=Heikin Ashi")
+        
+        # Set timeframe
+        await page.click("#header-toolbar-intervals")
+        await page.click(f"text={timeframe}")
+        
+        # Add VuManChu Cipher A and B indicators
+        await page.click("#header-toolbar-indicators")
+        await page.fill("input", "VuManChu")
+        await page.click("text=VuManChu Cipher A")
+        await page.click("text=VuManChu Cipher B")
+        
+        # Wait for indicators to load
+        await page.wait_for_selector(".study", timeout=30000)
+        
+        # Create screenshots directory if it doesn't exist
+        os.makedirs("screenshots", exist_ok=True)
+        
+        # Take screenshot of chart with Pyth data
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        screenshot_path = f"screenshots/{symbol_search}_PYTH_{timeframe}_{timestamp}.png"
+        await page.screenshot(path=screenshot_path)
+        
+        # Setup webhook alert on TradingView for additional confirmation
+        # TODO: Implement webhook alert setup if needed
+        
+        await browser.close()
+        
+    # Return chart data
+    return {
+        "symbol": symbol,
+        "timeframe": timeframe,
+        "data_source": "PYTH",
+        "screenshot_path": screenshot_path,
+        "timestamp": datetime.now().isoformat()
+    }
+
+async def get_perplexity_confirmation(symbol: str, position_type: str) -> bool:
+    """Get trade confirmation from Perplexity API."""
+    prompt = f"Would you close your {position_type} on {symbol} here and open a {opposite_type(position_type)}?"
+    
+    # Query Perplexity API
+    perplexity_client = get_perplexity_client()
+    result = perplexity_client.query(prompt)
+    
+    # Check if response is affirmative
+    return result.get("choices", [{}])[0].get("text", "").lower().startswith("yes")
+
+async def manage_trade(position: Dict, chart_data: Dict):
+    """Manage an open position based on chart data and Perplexity confirmation."""
+    symbol = position["symbol"]
+    position_type = position["side"]
+    
+    # Check VuManChu indicators
+    # TODO: Implement actual indicator checks
+    vumanchu_signal = "CLOSE"
+    
+    if vumanchu_signal == "CLOSE":
+        # Get Perplexity confirmation
+        close_confirmed = await get_perplexity_confirmation(symbol, position_type)
+        
+        if close_confirmed:
+            # Close position
+            await client.close_position(position["id"])
             
-        # Calculate position size using risk manager
-        position_size = 0
-        if risk_manager:
-            risk_manager.update_account_balance(balance)
-            if not risk_manager.can_open_new_trade():
-                logger.warning("Risk limits reached, cannot open new trade")
-                return {"success": False, "reason": "Risk limits reached"}
-                
-            position_size = risk_manager.calculate_position_size(entry_price, stop_loss)
-        else:
-            # Fallback calculation if risk manager is not available
-            risk_per_trade = RISK_PARAMS.get("max_risk_per_trade", 0.01)
-            position_size = (balance * risk_per_trade) / (abs(entry_price - stop_loss) / entry_price)
+            # Open opposite position
+            new_side = opposite_type(position_type)
+            new_position = await open_position(symbol, new_side, position["size"])
+            logger.info(f"Closed {position_type} and opened {new_side} on {symbol}")
             
-        # Adjust for leverage
-        position_size = position_size * leverage
+            return new_position
         
-        # Ensure position size is not too small
-        min_position_size = 0.001  # Example minimum position size
-        if position_size < min_position_size:
-            logger.warning(f"Position size too small: {position_size}, minimum: {min_position_size}")
-            return {"success": False, "reason": "Position size too small"}
-            
-        # Cap position size to max allowed
-        max_position_size = TRADING_PARAMS.get("max_position_size_usd", float('inf'))
-        if max_position_size and position_size > max_position_size:
-            logger.info(f"Position size {position_size} capped to max allowed {max_position_size}")
-            position_size = max_position_size
-            
-        # Round position size to appropriate precision
-        position_size = round(position_size, 4)
-        
-        # Map action to ORDER_SIDE
-        side = None
-        if action == "BUY":
-            side = ORDER_SIDE.BUY if hasattr(ORDER_SIDE, "BUY") else "BUY"
-        elif action == "SELL":
-            side = ORDER_SIDE.SELL if hasattr(ORDER_SIDE, "SELL") else "SELL"
-        else:
-            logger.error(f"Invalid action: {action}, must be BUY or SELL")
-            return {"success": False, "error": f"Invalid action: {action}"}
-            
-        # Display trade information
-        logger.info(f"Executing {action} order for {position_size} {symbol} at {entry_price}")
-        logger.info(f"Stop Loss: {stop_loss}, Take Profit: {take_profit}")
-        
-        # Execute the trade based on available client
-        result = None
-        
-        try:
-            # Try executing via SUI client if available
-            if BLUEFIN_CLIENT_SUI_AVAILABLE:
-                # SUI client uses place_order method
-                if hasattr(client, 'place_order'):
-                    result = await client.place_order(
-                        symbol=symbol,
-                        side=side,
-                        size=position_size,
-                        price=entry_price,
-                        leverage=leverage,
-                        stop_loss=stop_loss,
-                        take_profit=take_profit
-                    )
-                # SUI client might use create_signed_order
-                elif hasattr(client, 'create_signed_order') and OrderSignatureRequest:
-                    # Create order signature request
-                    order_request = OrderSignatureRequest(
-                        symbol=symbol,
-                        price=entry_price,
-                        quantity=position_size,
-                        side=side,
-                        leverage=leverage,
-                        reduceOnly=False,
-                        postOnly=False
-                    )
-                    
-                    # Create signed order
-                    signed_order = await client.create_signed_order(order_request)
-                    
-                    # Submit the order
-                    result = await client.submit_order(signed_order)
-                else:
-                    logger.error("Unsupported SUI client implementation")
-                    return {"success": False, "error": "Unsupported client implementation"}
-                    
-            # If v2 client is available
-            elif BLUEFIN_V2_CLIENT_AVAILABLE:
-                if hasattr(client, 'create_order'):
-                    # v2 client might use create_order
-                    result = await client.create_order(
-                        symbol=symbol,
-                        side=side,
-                        quantity=position_size,
-                        price=entry_price,
-                        leverage=leverage,
-                        reduce_only=False,
-                        post_only=False,
-                        stop_loss=stop_loss,
-                        take_profit=take_profit
-                    )
-                elif hasattr(client, 'place_order'):
-                    # Or place_order
-                    result = await client.place_order(
-                        symbol=symbol,
-                        side=side,
-                        size=position_size,
-                        price=entry_price,
-                        leverage=leverage,
-                        stop_loss=stop_loss,
-                        take_profit=take_profit
-                    )
-                else:
-                    logger.error("Unsupported v2 client implementation")
-                    return {"success": False, "error": "Unsupported client implementation"}
-            else:
-                # No client available, simulate execution
-                logger.warning("No Bluefin client available, simulating order execution")
-                
-                # Simulate a successful order
-                result = {
-                    "symbol": symbol,
-                    "side": side,
-                    "size": position_size,
-                    "price": entry_price,
-                    "leverage": leverage,
-                    "stop_loss": stop_loss,
-                    "take_profit": take_profit,
-                    "order_id": f"simulated_{datetime.now().timestamp()}",
-                    "timestamp": datetime.now().isoformat(),
-                    "simulated": True
-                }
-                
-            # Log the execution result
-            if result:
-                logger.info(f"Order execution successful: {result}")
-                return {
-                    "success": True,
-                    "order": result,
-                    "timestamp": datetime.now().isoformat()
-                }
-            else:
-                logger.error("Order execution failed: No result returned")
-                return {"success": False, "error": "No result returned from order execution"}
-                
-        except Exception as e:
-            logger.error(f"Error executing trade: {e}", exc_info=True)
-            return {"success": False, "error": str(e)}
-            
-    except Exception as e:
-        logger.error(f"Unexpected error in execute_trade: {e}", exc_info=True)
-        return {"success": False, "error": str(e)}
+    # Hold position until next check
+    return position
+
+async def open_position(symbol: str, side: str, size: float) -> Dict:
+    """Open a new position with Bluefin client."""
+    # Get parameters for symbol
+    params = SYMBOL_PARAMS.get(symbol, DEFAULT_PARAMS)
+    
+    # Calculate position size
+    equity = await client.get_account_equity()
+    position_size = params["position_size_pct"] * equity
+    
+    # Open position
+    order = await client.create_order(
+        symbol=symbol,
+        side=side,
+        size=position_size,
+        leverage=params["leverage"],
+        stop_loss_pct=params["stop_loss_pct"]
+    )
+    
+    logger.info(f"Opened {side} of {position_size} {symbol} at {order['price']}")
+    
+    return order
 
 async def main():
     """
@@ -928,7 +678,7 @@ async def main():
                 account_info = await get_account_info(client)
                 
                 # Analyze TradingView chart
-                analysis = await analyze_tradingview_chart()
+                analysis = await analyze_tradingview_chart(symbol, params["timeframe"])
                 
                 # Extract trade recommendation
                 trade_rec = extract_trade_recommendation(analysis)
