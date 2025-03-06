@@ -109,21 +109,13 @@ class PerplexityClient:
                 import base64
                 encoded_image = base64.b64encode(img_file.read()).decode('utf-8')
             
-            # Prepare vision API request
+            # Prepare API request with image as base64 in the text content
             payload = {
-                "model": "llama-3-sonar-small-32k-vision",
+                "model": "sonar-pro",
                 "messages": [
                     {
                         "role": "user",
-                        "content": [
-                            {"type": "text", "text": prompt},
-                            {
-                                "type": "image_url", 
-                                "image_url": {
-                                    "url": f"data:image/jpeg;base64,{encoded_image}"
-                                }
-                            }
-                        ]
+                        "content": f"{prompt}\n\nHere's the chart (attached as base64 image): data:image/jpeg;base64,{encoded_image}"
                     }
                 ],
                 "max_tokens": 4000
@@ -139,7 +131,7 @@ class PerplexityClient:
             logger.error(f"Error analyzing chart: {e}")
             return {"error": str(e)}
     
-    def query(self, prompt: str, model: str = "llama-3-sonar-small-32k") -> Dict[str, Any]:
+    def query(self, prompt: str, model: str = "sonar-pro") -> Dict[str, Any]:
         """
         Query the Perplexity API with a text prompt.
         

@@ -520,7 +520,7 @@ async def analyze_tradingview_chart(symbol, timeframe="1D"):
                 # Navigate to TradingView
                 tradingview_url = f"https://www.tradingview.com/chart/?symbol={symbol}&interval={timeframe}"
                 logger.info(f"Navigating to {tradingview_url}")
-                await page.goto(tradingview_url)
+                await page.goto(tradingview_url, timeout=60000)
                 
                 # Wait for chart to load
                 logger.info("Waiting for chart to load")
@@ -538,37 +538,45 @@ async def analyze_tradingview_chart(symbol, timeframe="1D"):
                     logger.error("Could not find chart element for screenshot")
                     return None
                 
+                # Close browser
                 await browser.close()
                 
-                # Step 1: Primary analysis with Claude
-                logger.info(f"Using Claude to analyze {symbol} chart")
-                claude_analysis = await analyze_chart_with_claude(screenshot_path, symbol)
+            # First, try to analyze chart with Claude 3.7 Sonnet
+            logger.info(f"Attempting chart analysis with Claude 3.7 Sonnet for {symbol}")
+            claude_analysis = await analyze_chart_with_claude(screenshot_path, symbol)
+            
+            if claude_analysis and "error" not in claude_analysis:
+                logger.info(f"Chart analysis with Claude successful for {symbol}")
+                return claude_analysis
+            else:
+                logger.warning(f"Chart analysis with Claude failed for {symbol}, falling back to Perplexity")
+            
+            # If Claude fails, fall back to Perplexity with sonar-pro model  
+            logger.info(f"Using Perplexity sonar-pro to analyze {symbol} chart")
+            perplexity_analysis = analyze_chart_with_perplexity(screenshot_path, symbol)
+            
+            if not perplexity_analysis:
+                logger.error("Failed to get Perplexity analysis")
+                return None
                 
-                if not claude_analysis:
-                    logger.error("Failed to get Claude analysis")
-                    return None
+            # Extract trading decision from Perplexity analysis
+            trading_recommendation = parse_perplexity_analysis(perplexity_analysis, symbol)
+            
+            # If we have a trading signal, get confirmation from Perplexity
+            if trading_recommendation.get("recommendation", {}).get("action") != "NONE":
+                # Get confirmation from Perplexity
+                confirmation = await get_perplexity_confirmation(symbol, trading_recommendation["recommendation"]["action"])
+                trading_recommendation["confirmation"] = confirmation
                 
-                # Step 2: Confirmation analysis with Perplexity
-                logger.info(f"Using Perplexity to confirm {symbol} chart analysis")
-                perplexity_analysis = analyze_chart_with_perplexity(screenshot_path, symbol)
-                
-                if not perplexity_analysis:
-                    logger.warning("Failed to get Perplexity confirmation, proceeding with Claude analysis only")
-                    return claude_analysis
-                
-                # Step 3: Combine analyses for final decision
-                combined_analysis = {
-                    "symbol": symbol,
-                    "timeframe": timeframe,
-                    "primary_analysis": claude_analysis,
-                    "confirmation_analysis": perplexity_analysis,
-                    "timestamp": datetime.now().isoformat()
-                }
-                
-                # Log analysis results
-                logger.info(f"Chart analysis complete for {symbol}")
-                
-                return combined_analysis
+                if confirmation:
+                    logger.info(f"Perplexity confirmed the {trading_recommendation['recommendation']['action']} signal for {symbol}")
+                else:
+                    logger.info(f"Perplexity rejected the {trading_recommendation['recommendation']['action']} signal for {symbol}")
+                    # Reset action to NONE if not confirmed
+                    trading_recommendation["recommendation"]["action"] = "NONE"
+                    trading_recommendation["recommendation"]["confidence"] = 0
+            
+            return trading_recommendation
                 
         except Exception as e:
             logger.error(f"Error analyzing TradingView chart: {e}", exc_info=True)
@@ -576,14 +584,54 @@ async def analyze_tradingview_chart(symbol, timeframe="1D"):
 
 async def get_perplexity_confirmation(symbol: str, position_type: str) -> bool:
     """Get trade confirmation from Perplexity API."""
-    prompt = f"Would you close your {position_type} on {symbol} here and open a {opposite_type(position_type)}?"
+    # Get API key from environment
+    api_key = os.environ.get("PERPLEXITY_API_KEY")
+    if not api_key:
+        logger.error("Perplexity API key not found in environment variables")
+        return False
     
-    # Query Perplexity API
-    perplexity_client = PerplexityClient(api_key=os.environ["PERPLEXITY_API_KEY"])
-    result = perplexity_client.query(prompt)
+    prompt = f"Would you recommend a {position_type} trade on {symbol} based on current market conditions? Answer with YES or NO at the beginning of your response, followed by your reasoning."
     
-    # Check if response is affirmative
-    return result.get("choices", [{}])[0].get("text", "").lower().startswith("yes")
+    # Construct request payload
+    payload = {
+        "model": "sonar-pro",
+        "messages": [
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ],
+        "max_tokens": 500
+    }
+    
+    # Setup headers
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+    
+    try:
+        # Query Perplexity API
+        response = requests.post("https://api.perplexity.ai/chat/completions", json=payload, headers=headers)
+        
+        if response.status_code != 200:
+            logger.error(f"Error from Perplexity API: {response.status_code} - {response.text}")
+            return False
+            
+        result = response.json()
+        
+        # Extract the response text
+        response_text = result.get("choices", [{}])[0].get("message", {}).get("content", "").lower()
+        
+        # Check if response is affirmative
+        is_confirmed = response_text.startswith("yes")
+        logger.info(f"Perplexity confirmation for {position_type} on {symbol}: {'YES' if is_confirmed else 'NO'}")
+        
+        return is_confirmed
+        
+    except Exception as e:
+        logger.error(f"Error getting Perplexity confirmation: {e}")
+        return False
 
 async def manage_trade(position: Dict, chart_data: Dict):
     """Manage an open position based on chart data and Perplexity confirmation."""
@@ -650,11 +698,36 @@ except Exception as e:
     claude_client = None
 
 def init_clients():
-    """Initialize all API clients"""
+    """Initialize API clients for the trading agent"""
     global bluefin_client, claude_client
+    
     try:
         # Initialize Bluefin client
         logger.info("Initializing Bluefin client")
+        init_bluefin_client()
+        
+        # NOTE: Claude initialization is disabled temporarily, but kept for future use
+        # Initialize Claude client
+        logger.info("Initializing Claude client")
+        if os.environ.get("ENABLE_CLAUDE", "false").lower() == "true":
+            init_claude_client()
+        else:
+            logger.info("Claude API is disabled, skipping initialization")
+            claude_client = None
+    
+    except Exception as e:
+        logger.error(f"Error initializing clients: {e}", exc_info=True)
+        if not bluefin_client:
+            logger.warning("Failed to initialize Bluefin client")
+        if not claude_client:
+            logger.warning("Failed to initialize Claude client")
+
+def init_bluefin_client():
+    """Initialize the Bluefin client using environment variables"""
+    global bluefin_client
+    
+    try:
+        # Check for API key in environment variables
         if "BLUEFIN_API_KEY" in os.environ and "BLUEFIN_API_SECRET" in os.environ:
             api_key = os.environ["BLUEFIN_API_KEY"]
             api_secret = os.environ["BLUEFIN_API_SECRET"]
@@ -662,17 +735,9 @@ def init_clients():
         else:
             logger.warning("Bluefin API credentials not found in environment variables")
             bluefin_client = None
-        
-        # Initialize Claude client
-        logger.info("Initializing Claude client")
-        init_claude_client()
-        
     except Exception as e:
-        logger.error(f"Error initializing clients: {e}", exc_info=True)
-        if not bluefin_client:
-            logger.warning("Failed to initialize Bluefin client")
-        if not claude_client:
-            logger.warning("Failed to initialize Claude client")
+        logger.error(f"Error initializing Bluefin client: {e}", exc_info=True)
+        bluefin_client = None
 
 def init_claude_client():
     """Initialize the Claude API client using environment variables"""
@@ -699,10 +764,38 @@ def init_claude_client():
         logger.info(f"Claude API rate limits: {requests_per_minute} requests/min, " 
                     f"{input_tokens_per_minute} input tokens/min, "
                     f"{output_tokens_per_minute} output tokens/min")
-    
     except Exception as e:
         logger.error(f"Failed to initialize Claude client: {e}", exc_info=True)
         claude_client = None
+
+def test_claude_api():
+    """Test the Claude API with a simple prompt"""
+    global claude_client
+    
+    if not claude_client:
+        logger.error("Claude client not initialized")
+        return False
+        
+    try:
+        logger.info("Testing Claude API with a simple prompt")
+        
+        response = claude_client.messages.create(
+            model=os.environ.get("CLAUDE_MODEL", "claude-3.5-haiku"),
+            max_tokens=100,
+            temperature=0.2,
+            messages=[
+                {
+                    "role": "user",
+                    "content": "Analyze the cryptocurrency market briefly. What are your thoughts on SUI/USD?"
+                }
+            ]
+        )
+        
+        logger.info(f"Claude API test successful. Response: {response.content[0].text}")
+        return True
+    except Exception as e:
+        logger.error(f"Error testing Claude API: {e}", exc_info=True)
+        return False
 
 async def main():
     """Main function to run the trading agent"""
@@ -711,11 +804,6 @@ async def main():
     # Initialize API clients
     init_clients()
     
-    # Check if Claude client is initialized
-    if not claude_client:
-        logger.error("Claude client not initialized, cannot proceed with trading analysis")
-        return
-    
     # Load trading configuration
     symbol = os.environ.get("DEFAULT_SYMBOL", "BTC/USD")
     timeframe = os.environ.get("DEFAULT_TIMEFRAME", "1h")
@@ -723,7 +811,7 @@ async def main():
     logger.info(f"Beginning trading analysis for {symbol} on {timeframe} timeframe")
     
     try:
-        # Analyze TradingView chart using Claude and Perplexity
+        # Analyze TradingView chart using Perplexity only
         chart_analysis = await analyze_tradingview_chart(symbol, timeframe)
         
         if not chart_analysis:
@@ -740,9 +828,9 @@ async def main():
             logger.info(f"Trade executed: {trade_result}")
         else:
             logger.info("No trade executed")
-            
+    
     except Exception as e:
-        logger.error(f"Error in main function: {e}", exc_info=True)
+        logger.error(f"Error in trading analysis: {e}", exc_info=True)
     
     logger.info("Trading agent run completed")
 
@@ -775,28 +863,38 @@ def capture_chart_screenshot(ticker, timeframe="1D"):
 
 def analyze_chart_with_perplexity(screenshot_path, ticker):
     """Analyze a chart screenshot using Perplexity AI"""
-    # Convert image to base64 for transmission
-    with open(screenshot_path, "rb") as image_file:
-        encoded_image = base64.b64encode(image_file.read()).decode('utf-8')
+    # Get API key from environment
+    api_key = os.environ.get("PERPLEXITY_API_KEY")
+    if not api_key:
+        logger.error("Perplexity API key not found in environment variables")
+        return None
     
-    # Construct prompt with image and context
+    # Construct a simple text-only prompt for testing
     prompt = {
-        "model": "sonar-reasoning",  # Using the deep seek R1 model
+        "model": "sonar",
         "messages": [
             {
                 "role": "user",
-                "content": f"Analyze this trading chart for {ticker}. What are the key technical indicators, support/resistance levels, and potential trade setups?",
-                "images": [encoded_image]
+                "content": f"Analyze the current market conditions for {ticker}. Would you recommend a BUY, SELL, or HOLD position? Include your reasoning."
             }
-        ]
+        ],
+        "max_tokens": 1000
+    }
+    
+    # Setup headers
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
     }
     
     # Send to Perplexity API
-    response = requests.post("https://api.perplexity.ai/analyze", json=prompt)
+    response = requests.post("https://api.perplexity.ai/chat/completions", json=prompt, headers=headers)
     
     # Process response
     if response.status_code == 200:
         analysis = response.json()
+        # Debug: Print the raw response
+        logger.info(f"Raw Perplexity response: {json.dumps(analysis, indent=2)}")
         return analysis
     else:
         logger.error(f"Error from Perplexity API: {response.status_code} - {response.text}")
@@ -854,7 +952,7 @@ Format your analysis in a structured way with clear sections."""
         
         # Create message with anthropic.Client - using correct schema
         response = claude_client.messages.create(
-            model=model,
+            model="claude-3.7-sonnet",
             max_tokens=max_tokens,
             temperature=temperature,
             system=system_prompt,
@@ -994,9 +1092,150 @@ async def execute_trade_when_appropriate(analysis):
     else:
         logger.info(f"Not executing trade. Action: {action}, Confidence: {confidence}")
 
+def parse_perplexity_analysis(analysis, ticker):
+    """
+    Parse Perplexity API response to extract trading recommendations
+    
+    Args:
+        analysis: The raw Perplexity API response
+        ticker: The symbol being analyzed
+        
+    Returns:
+        dict: Trading recommendation with action, confidence, and other metrics
+    """
+    recommendation = {
+        "symbol": ticker,
+        "timestamp": datetime.now().isoformat(),
+        "recommendation": {
+            "action": "NONE",
+            "confidence": 0,
+            "entry_price": None,
+            "stop_loss": None,
+            "take_profit": None,
+            "risk_reward_ratio": None,
+            "timeframe": None
+        }
+    }
+    
+    try:
+        if not analysis or not isinstance(analysis, dict):
+            logger.warning("Invalid Perplexity analysis data")
+            return recommendation
+            
+        # Extract the response text from Perplexity
+        analysis_text = ""
+        if "choices" in analysis and len(analysis["choices"]) > 0:
+            message = analysis["choices"][0].get("message", {})
+            if "content" in message:
+                analysis_text = message["content"]
+            
+        if not analysis_text:
+            logger.warning("No text content found in Perplexity analysis")
+            return recommendation
+            
+        # Debug: Print the extracted text
+        logger.info(f"Extracted analysis text: {analysis_text[:200]}...")
+        
+        # Detect recommendation type based on explicit statements
+        recommendation_type = "NONE"
+        confidence = 0.0
+        
+        # Look for explicit recommendations
+        if re.search(r'recommendation.*?\b(buy|long)\b', analysis_text.lower()) or re.search(r'\b(buy|long)\b.*?recommended', analysis_text.lower()):
+            recommendation_type = "BUY"
+            confidence = 0.8
+        elif re.search(r'recommendation.*?\b(sell|short)\b', analysis_text.lower()) or re.search(r'\b(sell|short)\b.*?recommended', analysis_text.lower()):
+            recommendation_type = "SELL"
+            confidence = 0.8
+        elif re.search(r'recommendation.*?\b(hold|neutral|accumulate)\b', analysis_text.lower()) or re.search(r'\b(hold|neutral|accumulate)\b.*?recommended', analysis_text.lower()):
+            recommendation_type = "HOLD"
+            confidence = 0.7
+            
+        # If no explicit recommendation, use sentiment analysis
+        if recommendation_type == "NONE":
+            # Look for buy/sell signals
+            buy_indicators = ["buy", "bullish", "uptrend", "long", "positive", "increase", "growth"]
+            sell_indicators = ["sell", "bearish", "downtrend", "short", "negative", "decrease", "fall"]
+            hold_indicators = ["hold", "neutral", "mixed", "cautious", "moderate", "balanced", "sideways", "accumulate"]
+            
+            # Count mentions of bullish/bearish terms
+            buy_count = sum(1 for indicator in buy_indicators if indicator in analysis_text.lower())
+            sell_count = sum(1 for indicator in sell_indicators if indicator in analysis_text.lower())
+            hold_count = sum(1 for indicator in hold_indicators if indicator in analysis_text.lower())
+            
+            # Determine action based on sentiment
+            if buy_count > sell_count + hold_count:
+                recommendation_type = "BUY"
+                confidence = min(0.5 + (buy_count - sell_count) * 0.05, 0.75)
+            elif sell_count > buy_count + hold_count:
+                recommendation_type = "SELL"
+                confidence = min(0.5 + (sell_count - buy_count) * 0.05, 0.75)
+            elif hold_count > 0:
+                recommendation_type = "HOLD"
+                confidence = min(0.5 + hold_count * 0.05, 0.7)
+        
+        recommendation["recommendation"]["action"] = recommendation_type
+        recommendation["recommendation"]["confidence"] = confidence
+            
+        # Extract price targets if available
+        price_match = re.search(r"(?:current|price|trading at)[:\s]+\$?(\d+(?:\.\d+)?)", analysis_text.lower())
+        if price_match:
+            recommendation["recommendation"]["entry_price"] = float(price_match.group(1))
+            
+        # Look for support levels as potential stop loss
+        sl_match = re.search(r"(?:stop[- ]loss|support)[:\s]+\$?(\d+(?:\.\d+)?)", analysis_text.lower())
+        if sl_match:
+            recommendation["recommendation"]["stop_loss"] = float(sl_match.group(1))
+            
+        # Look for resistance as potential take profit
+        tp_match = re.search(r"(?:take[- ]profit|target|resistance)[:\s]+\$?(\d+(?:\.\d+)?)", analysis_text.lower())
+        if tp_match:
+            recommendation["recommendation"]["take_profit"] = float(tp_match.group(1))
+            
+        # Try to extract timeframe
+        if "short-term" in analysis_text.lower() or "day" in analysis_text.lower() or "hourly" in analysis_text.lower():
+            recommendation["recommendation"]["timeframe"] = "short-term"
+        elif "medium-term" in analysis_text.lower() or "week" in analysis_text.lower() or "monthly" in analysis_text.lower():
+            recommendation["recommendation"]["timeframe"] = "medium-term"
+        elif "long-term" in analysis_text.lower() or "year" in analysis_text.lower():
+            recommendation["recommendation"]["timeframe"] = "long-term"
+            
+        # Calculate risk/reward if both stop-loss and take-profit are available
+        if recommendation["recommendation"]["stop_loss"] and recommendation["recommendation"]["take_profit"] and recommendation["recommendation"]["entry_price"]:
+            entry = recommendation["recommendation"]["entry_price"]
+            sl = recommendation["recommendation"]["stop_loss"]
+            tp = recommendation["recommendation"]["take_profit"]
+            
+            if recommendation["recommendation"]["action"] == "BUY":
+                if entry > sl and tp > entry:  # Valid buy setup
+                    risk = entry - sl
+                    reward = tp - entry
+                    if risk > 0:
+                        recommendation["recommendation"]["risk_reward_ratio"] = reward / risk
+            elif recommendation["recommendation"]["action"] == "SELL":
+                if entry < sl and tp < entry:  # Valid sell setup
+                    risk = sl - entry
+                    reward = entry - tp
+                    if risk > 0:
+                        recommendation["recommendation"]["risk_reward_ratio"] = reward / risk
+    
+    except Exception as e:
+        logger.error(f"Error parsing Perplexity analysis: {e}")
+        
+    return recommendation
+
 if __name__ == "__main__":
-    setup_logging()
-    initialize_risk_manager() 
+    # Set up logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    logger = logging.getLogger('bluefin_agent')
+    
+    # Initialize clients
+    init_clients()
+    
+    # Run the main function (Perplexity only)
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
