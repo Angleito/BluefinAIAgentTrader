@@ -99,3 +99,15 @@ MIT
 ## Disclaimer
 
 This software is for educational purposes only. Trading cryptocurrencies involves significant risk. Use at your own risk.
+
+## AI Decision Process
+
+The Perplexity Trader uses a two-step AI process for making trading decisions:
+
+1. **Claude 3.7 Sonnet**: The primary AI for analyzing market data and generating initial trading decisions. Claude 3.7 Sonnet is Anthropic's most advanced model, capable of nuanced reasoning and analysis. It receives market data as input and outputs a structured decision including the action (buy/sell/hold) and reasoning.
+
+2. **Perplexity**: Acts as a confirmation step for Claude's decisions. The initial decision from Claude is passed to Perplexity, which assesses if it agrees with the decision and reasoning. If Perplexity confirms the decision, the trade is executed. If Perplexity disagrees, the trade is cancelled or modified based on predefined logic.
+
+This combination of Claude's deep reasoning capabilities and Perplexity's confirmation step helps ensure trading decisions are robust and well-justified. The two AIs provide an additional layer of scrutiny to avoid impulsive or poorly reasoned trades.
+
+Configuration for the AI models can be found in `config.py`. The `CLAUDE_CONFIG` dictionary specifies the model version, API key, and generation parameters for Claude. Perplexity configuration is under `PERPLEXITY_CONFIG`.
