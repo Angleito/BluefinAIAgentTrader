@@ -1258,10 +1258,10 @@ async def process_alerts():
                     # Determine trade direction based on signal type and action
                     if action == "BUY":
                         trade_direction = "Bullish"
-                        side = ORDER_SIDE_ENUM.BUY
+                        side = ORDER_SIDE.BUY
                     elif action == "SELL":
                         trade_direction = "Bearish"
-                        side = ORDER_SIDE_ENUM.SELL
+                        side = ORDER_SIDE.SELL
                     else:
                         logger.warning(f"Invalid action in alert: {action}")
                         os.remove(alert_path)
