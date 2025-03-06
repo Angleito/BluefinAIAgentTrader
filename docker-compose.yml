@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  web:
+    build: .
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./screenshots:/app/screenshots
+      - ./logs:/app/logs
+    environment:
+      - FLASK_ENV=production
+      - PERPLEXITY_API_KEY=${PERPLEXITY_API_KEY}
+      - BLUEFIN_PRIVATE_KEY=${BLUEFIN_PRIVATE_KEY}
+    restart: unless-stopped
+    command: gunicorn --bind 0.0.0.0:5000 --workers 2 app:app
+
+  trader:
+    build: .
+    volumes:
+      - ./screenshots:/app/screenshots
+      - ./logs:/app/logs
+    environment:
+      - PERPLEXITY_API_KEY=${PERPLEXITY_API_KEY}
+      - BLUEFIN_PRIVATE_KEY=${BLUEFIN_PRIVATE_KEY}
+    restart: unless-stopped
+    command: python agent.py 
