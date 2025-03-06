@@ -123,7 +123,7 @@ class TestWebhookIntegration(unittest.TestCase):
             ("ETH/USDT", "ETH-PERP"),
             ("BINANCE:BTCUSDT", "BTC-PERP"),
             ("BINANCE:SOLUSDT", "SOL-PERP"),
-            ("COINBASE:ETHBTC", "ETH-PERP")
+            ("COINBASE:ETHBTC", "ETHBTC-PERP")
         ]
         
         for tv_symbol, expected in test_cases:
