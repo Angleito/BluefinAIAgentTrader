@@ -27,6 +27,8 @@ import os
 import logging
 import asyncio
 from typing import Dict, List, Optional, Union, Any
+from bluefin_client_sui import BluefinClient as SuiClient, Networks, SOCKET_EVENTS
+from bluefin.v2.client import BluefinClient as ApiClient
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +42,9 @@ class ORDER_TYPE:
     LIMIT = "LIMIT"
     STOP_MARKET = "STOP_MARKET"
     TAKE_PROFIT = "TAKE_PROFIT"
+
+# Constants
+REQUEUE_ADJUSTMENT_THRESHOLD = 2  # Adjust price after this many requeues
 
 class BluefinClientInterface:
     """Interface for Bluefin clients to implement."""
@@ -92,13 +97,14 @@ class BluefinSuiClient(BluefinClientInterface):
     def __init__(self, private_key: str, network: str = "MAINNET"):
         """Initialize the Bluefin SUI client."""
         try:
-            from bluefin_client_sui import BluefinClient as SuiClient, Networks
-            
-            self.network = getattr(Networks, network, Networks.MAINNET)
+            self.network = Networks[network]
             self.client = SuiClient(
-                private_key=private_key,
-                network=self.network
+                True,  # agree to terms and conditions
+                self.network,
+                private_key
             )
+            # Initialize orders list to track orders
+            self.orders = []
             logger.info(f"Initialized Bluefin SUI client for network: {network}")
         except ImportError:
             logger.error("Failed to import bluefin_client_sui. Please install it with: "
@@ -107,8 +113,29 @@ class BluefinSuiClient(BluefinClientInterface):
     
     async def init(self) -> None:
         """Initialize the client connection."""
-        await self.client.init(onboarding=True)
+        await self.client.init()
         logger.info("Bluefin SUI client initialized successfully")
+
+        # Open WebSocket connection
+        await self.client.socket.open()
+
+        # Subscribe to user updates
+        await self.client.socket.subscribe_user_update_by_token()
+
+        # Listen for OrderUpdate events
+        await self.client.socket.listen(SOCKET_EVENTS.ORDER_UPDATE.value, self.order_update_handler)
+    
+        # Listen for UserTrade events  
+        await self.client.socket.listen(SOCKET_EVENTS.USER_TRADE.value, self.user_trade_handler)
+        
+        # Listen for OrderSettlementUpdate events
+        await self.client.socket.listen(SOCKET_EVENTS.ORDER_SETTLEMENT_UPDATE.value, self.order_settlement_update_handler)
+        
+        # Listen for OrderRequeueUpdate events
+        await self.client.socket.listen(SOCKET_EVENTS.ORDER_REQUEUE_UPDATE.value, self.order_requeue_update_handler)
+        
+        # Listen for OrderCancelledOnReversionUpdate events
+        await self.client.socket.listen(SOCKET_EVENTS.ORDER_CANCELLED_ON_REVERSION_UPDATE.value, self.order_cancelled_on_reversion_handler)
     
     async def get_account_info(self) -> Dict[str, Any]:
         """Get account information including balance and positions."""
@@ -181,6 +208,19 @@ class BluefinSuiClient(BluefinClientInterface):
             signed_order = self.client.create_signed_order(signature_request)
             response = await self.client.post_signed_order(signed_order)
             
+            # Create and track the order
+            order = Order(
+                symbol=symbol,
+                side=side,
+                quantity=quantity,
+                order_type=order_type,
+                price=price or 0.0,
+                leverage=leverage or 1,
+                order_hash=signed_order.get('orderHash', ''),
+                status='created'
+            )
+            self.orders.append(order)
+            
             return response
         except Exception as e:
             logger.error(f"Failed to place order: {str(e)}")
@@ -235,23 +275,142 @@ class BluefinSuiClient(BluefinClientInterface):
     
     async def close(self) -> None:
         """Close the client connection."""
-        await self.client.disconnect()
+        # Unsubscribe from user updates
+        await self.client.socket.unsubscribe_user_update_by_token()
+        
+        # Close WebSocket connection
+        await self.client.socket.close()
+        
         logger.info("Bluefin SUI client disconnected")
+
+    async def order_update_handler(self, event):
+        print(f"Received OrderUpdate event:")
+        print(f"  Order ID: {event['orderId']}")  
+        print(f"  Symbol: {event['symbol']}")
+        print(f"  Status: {event['status']}")
+        print(f"  Price: {event['price']}")
+        print(f"  Quantity: {event['quantity']}")
+
+    async def user_trade_handler(self, event):
+        print(f"Received UserTrade event:")  
+        print(f"  Symbol: {event['symbol']}")
+        print(f"  Trade ID: {event['id']}")
+        print(f"  Order ID: {event['orderId']}")
+        print(f"  Side: {event['side']}")
+        print(f"  Price: {event['price']}")  
+        print(f"  Quantity: {event['qty']}")
+
+    async def order_settlement_update_handler(self, event):
+        print(f"Received OrderSettlementUpdate event:")
+        print(f"  Order Hash: {event['orderHash']}")
+        print(f"  Symbol: {event['symbol']}")
+        print(f"  Quantity Sent for Settlement: {event['quantitySentForSettlement']}")
+        print(f"  Is Maker: {event['isMaker']}")
+        print(f"  Is Buy: {event['isBuy']}")
+        print(f"  Average Fill Price: {event['avgFillPrice']}")
+        print(f"  Fill ID: {event['fillId']}")
+        print("  Matched Orders:")
+        for order in event['matchedOrders']:
+            print(f"    Fill Price: {order['fillPrice']}, Quantity: {order['quantity']}")
+            
+        # Locate the order by hash
+        order = next((o for o in self.orders if o.hash == event['orderHash']), None)
+        
+        if order:
+            # Update the settlement status
+            order.settlement_status = "sent"
+            order.fill_price = float(event['avgFillPrice'])
+            order.matched_quantity = float(event['quantitySentForSettlement'])
+            order.is_maker = event['isMaker']
+            # Save the updated order
+            await self.save_order(order)
+        else:
+            logger.warning(f"Received settlement update for unknown order: {event['orderHash']}")
+            
+    async def order_requeue_update_handler(self, event):
+        print(f"Received OrderRequeueUpdate event:")
+        print(f"  Order Hash: {event['orderHash']}")
+        print(f"  Symbol: {event['symbol']}")
+        print(f"  Quantity Sent for Requeue: {event['quantitySentForRequeue']}")
+        print(f"  Is Buy: {event['isBuy']}")
+        print(f"  Fill ID: {event['fillId']}")
+        
+        # Locate the order by hash
+        order = next((o for o in self.orders if o.hash == event['orderHash']), None)
+        
+        if order:
+            # Increment the requeue count
+            order.requeue_count += 1
+            
+            # Check if we need to adjust the price
+            if order.requeue_count > REQUEUE_ADJUSTMENT_THRESHOLD:
+                # Calculate new price with 1% adjustment
+                adjustment = 1.01 if order.side == "BUY" else 0.99
+                new_price = order.price * adjustment
+                
+                logger.info(f"Order {order.hash} failed settlement {order.requeue_count} times, adjusting price to {new_price}")
+                
+                # Update the order price
+                order.price = new_price
+                
+            # Save the updated order
+            await self.save_order(order)
+        else:
+            logger.warning(f"Received requeue update for unknown order: {event['orderHash']}")
+        
+    async def order_cancelled_on_reversion_handler(self, event):
+        print(f"Received OrderCancelledOnReversionUpdate event:")
+        print(f"  Order Hash: {event['orderHash']}")
+        print(f"  Symbol: {event['symbol']}")
+        print(f"  Quantity Cancelled: {event['quantitySentForCancellation']}")
+        print(f"  Is Buy: {event['isBuy']}")
+        print(f"  Fill ID: {event['fillId']}")
+        
+        # Locate the order by hash
+        order = next((o for o in self.orders if o.hash == event['orderHash']), None)
+        
+        if order:
+            # Mark the order as cancelled
+            order.cancelled = True
+            
+            # Save the updated order
+            await self.save_order(order)
+        else:
+            logger.warning(f"Received cancellation update for unknown order: {event['orderHash']}")
+
+    async def save_order(self, order):
+        """Save updated order information."""
+        # Find the order in our list and update it
+        existing_order = next((o for o in self.orders if o.hash == order.hash), None)
+        if existing_order:
+            # Update the existing order with new values
+            for attr, value in vars(order).items():
+                setattr(existing_order, attr, value)
+        else:
+            # Add the new order to our list
+            self.orders.append(order)
+            
+        # Log the order update
+        logger.info(f"Order updated: {order}")
+        
+        # Here you could persist orders to a database if needed
+        
+        return order
 
 class BluefinApiClient(BluefinClientInterface):
     """Client implementation for Bluefin Exchange using API key authentication."""
     
-    def __init__(self, api_key: str, api_secret: str, api_url: Optional[str] = None):
-        """Initialize the Bluefin V2 API client."""
+    def __init__(self, api_key: str, api_secret: str, network: str = "MAINNET"):
+        """Initialize the Bluefin API client."""
         try:
-            from bluefin.v2.client import BluefinClient
-            
-            self.client = BluefinClient(
-                api_key=api_key,
-                api_secret=api_secret,
-                api_url=api_url
+            self.network = Networks[network]
+            self.client = ApiClient(
+                True,  # agree to terms and conditions 
+                self.network,
+                api_key,
+                api_secret
             )
-            logger.info("Initialized Bluefin V2 API client")
+            logger.info(f"Initialized Bluefin API client for network: {network}")
         except ImportError:
             logger.error("Failed to import bluefin.v2.client. Please install it with: "
                         "pip install git+https://github.com/fireflyprotocol/bluefin-v2-client-python.git")
@@ -319,7 +478,7 @@ class BluefinApiClient(BluefinClientInterface):
     async def close(self) -> None:
         """Close the client connection."""
         await self.client.close_session()
-        logger.info("Bluefin V2 API client closed")
+        logger.info("Bluefin API client closed")
 
 class MockBluefinClient(BluefinClientInterface):
     """Mock client for testing without making actual API calls."""
@@ -530,10 +689,10 @@ async def create_bluefin_client(
     # Try to create API client if API credentials are available
     if api_key and api_secret:
         try:
-            logger.info("Creating Bluefin V2 API client")
-            return BluefinApiClient(api_key=api_key, api_secret=api_secret, api_url=api_url)
+            logger.info("Creating Bluefin API client")
+            return BluefinApiClient(api_key=api_key, api_secret=api_secret, network=network)
         except Exception as e:
-            logger.error(f"Failed to initialize Bluefin V2 API client: {str(e)}")
+            logger.error(f"Failed to initialize Bluefin API client: {str(e)}")
             raise
     
     # If we get here and no clients could be created, raise an error

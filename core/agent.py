@@ -1347,6 +1347,31 @@ async def execute_trade(symbol: str, side: str, position_size: float = None, ris
                 order = await client.post_signed_order(signed_order)
                 logger.info(f"Posted signed order, response: {order}")
                 
+                # Log order status updates from socket events
+                def log_order_update(event):
+                    if event['orderHash'] == signed_order['orderHash']:
+                        if event['type'] == 'OrderSettlementUpdate':
+                            logger.info(f"Order {event['orderHash']} sent for on-chain settlement")
+                            logger.info(f"  Quantity: {event['quantitySentForSettlement']}")
+                            logger.info(f"  Is Maker: {event['isMaker']}")
+                            logger.info(f"  Average Fill Price: {event['avgFillPrice']}")
+                            logger.info(f"  Matched Orders:")
+                            for matched_order in event['matchedOrders']:
+                                logger.info(f"    Fill Price: {matched_order['fillPrice']}, Quantity: {matched_order['quantity']}")
+                                
+                        elif event['type'] == 'OrderRequeueUpdate':
+                            logger.warning(f"Order {event['orderHash']} settlement failed, re-entering orderbook")
+                            logger.info(f"  Quantity Requeued: {event['quantitySentForRequeue']}")
+                            
+                        elif event['type'] == 'OrderCancelledOnReversionUpdate':
+                            logger.warning(f"Order {event['orderHash']} failed settlement and was cancelled")
+                            logger.info(f"  Quantity Cancelled: {event['quantitySentForCancellation']}")
+                            
+                # Register the log_order_update callback
+                client.socket.on(SOCKET_EVENTS.ORDER_SETTLEMENT_UPDATE.value, log_order_update)
+                client.socket.on(SOCKET_EVENTS.ORDER_REQUEUE_UPDATE.value, log_order_update) 
+                client.socket.on(SOCKET_EVENTS.ORDER_CANCELLED_ON_REVERSION_UPDATE.value, log_order_update)
+                
             # Fallback to direct methods if signature flow not supported
             elif hasattr(client, "create_order"):
                 order = await client.create_order(
@@ -1395,20 +1420,9 @@ async def execute_trade(symbol: str, side: str, position_size: float = None, ris
         logger.info(f"Order created: {order}")
         return order
         
-    except Exception as e:
-        logger.error(f"Error executing trade: {e}")
-        logger.error(traceback.format_exc())
-        # Return a mock order on failure
-        return {
-            "id": f"error_{get_timestamp()}",
-            "symbol": symbol,
-            "side": side,
-            "size": position_size if position_size is not None else 0,
-            "type": order_type,
-            "price": price,
-            "status": "error",
-            "error": str(e)
-        }
+    finally:
+        # Close the Bluefin client connection
+        await client.close()
 
 async def process_alerts():
     """
@@ -1774,6 +1788,41 @@ async def ensure_leverage(symbol, target_leverage):
         logger.error(f"Error adjusting leverage for {symbol}: {e}")
         logger.error(traceback.format_exc())
         return False
+
+# Define a simple Order class to track order state
+class Order:
+    def __init__(self, 
+                 symbol: str, 
+                 side: str, 
+                 quantity: float, 
+                 order_type: str,
+                 price: float = 0.0,
+                 leverage: int = 1,
+                 order_hash: str = "",
+                 status: str = "pending"):
+        self.symbol = symbol
+        self.side = side
+        self.quantity = quantity
+        self.order_type = order_type
+        self.price = price
+        self.leverage = leverage
+        self.hash = order_hash
+        self.status = status
+        self.created_at = datetime.now()
+        
+        # Settlement status fields
+        self.settlement_status = "pending"
+        self.requeue_count = 0
+        self.cancelled = False
+        self.fill_price = 0.0
+        self.matched_quantity = 0.0
+        self.is_maker = False
+        
+    def __str__(self):
+        return f"Order({self.symbol}, {self.side}, {self.quantity}, {self.order_type}, price={self.price}, leverage={self.leverage}, status={self.status}, settlement_status={self.settlement_status}, requeue_count={self.requeue_count}, cancelled={self.cancelled})"
+    
+    def __repr__(self):
+        return self.__str__()
 
 if __name__ == "__main__":
     asyncio.run(main())
