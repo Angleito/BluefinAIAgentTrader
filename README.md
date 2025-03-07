@@ -1,212 +1,232 @@
-# Trading Agent with AI Analysis
+# PerplexityTrader: AI-Powered Crypto Trading Agent
 
-A comprehensive trading agent that uses Claude 3.7 Sonnet (with Perplexity as fallback) to analyze TradingView charts and execute trades on the Bluefin Exchange.
+An advanced trading agent that uses Claude and Perplexity AI to analyze TradingView charts and execute trades on the Bluefin Exchange.
+
+![Trading Agent Architecture](https://via.placeholder.com/800x400?text=Trading+Agent+Architecture)
 
 ## Features
 
-- Chart analysis using Claude 3.7 Sonnet and Perplexity AI
-- TradingView webhook integration for automated trade signals
-- Bluefin Exchange API integration for real trading
-- Docker deployment for 24/7 autonomous operation
-- Public webhook endpoint via ngrok
+- **AI-Powered Analysis**: Utilizes Claude 3.7 Sonnet and Perplexity's sonar-pro models for chart analysis
+- **Multi-Exchange Support**: Works with Bluefin Exchange (SUI and V2 APIs)
+- **Resilient Design**: Multiple fallback mechanisms and error recovery
+- **Risk Management**: Configurable risk parameters and position sizing
+- **Docker Integration**: Easy deployment in containerized environments
+- **Mock Trading Mode**: Test strategies without risking real funds
+- **API Monitoring**: Track agent status and performance via REST API
 
-## Prerequisites
+## Architecture
 
-- Docker and Docker Compose
-- Bluefin Exchange account with API keys
-- Anthropic API key (for Claude)
-- Perplexity API key
-- ngrok account with authtoken
+The trading agent consists of these key components:
 
-## Setup
+### Core Components
 
-### 1. Configure Environment Variables
+1. **Bluefin Client Interface**: Connect to trading platforms
+2. **Chart Analysis System**: AI-powered technical analysis
+3. **Alert Processing System**: Handle trading signals
+4. **Risk Management System**: Control position sizing and risk
+5. **API Server**: Monitor and control the agent
+
+### Trading Process Flow
+
+1. **Alert Triggering**: Monitor for new trading signals
+2. **Chart Analysis**: Capture and analyze charts with AI
+3. **Trade Confirmation**: Double-check signals before execution
+4. **Position Sizing**: Calculate appropriate trade size
+5. **Trade Execution**: Place orders on the exchange
+6. **Position Management**: Monitor and adjust open positions
+
+## Installation
+
+### Prerequisites
+
+- Python 3.8+
+- Docker (optional, for containerized deployment)
+
+### Option 1: Local Installation
+
+```bash
+# Clone the repository
+git clone https://github.com/yourusername/perplexitytrader.git
+cd perplexitytrader
+
+# Create virtual environment
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Install Playwright
+python -m playwright install chromium
+```
+
+### Option 2: Docker Installation
+
+```bash
+# Build the Docker image
+docker build -t perplexitytrader .
+
+# Run the container
+docker run -d --name perplexitytrader \
+  -v $(pwd)/config:/app/config \
+  -v $(pwd)/logs:/app/logs \
+  -v $(pwd)/screenshots:/app/screenshots \
+  -v $(pwd)/alerts:/app/alerts \
+  --env-file .env \
+  perplexitytrader
+```
+
+## Configuration
+
+### Environment Variables
 
 Create a `.env` file with the following variables:
 
 ```
-# Bluefin API Keys
-BLUEFIN_PRIVATE_KEY=your_private_key_here
-BLUEFIN_NETWORK=MAINNET
-
-# AI API Keys
-ANTHROPIC_API_KEY=your_anthropic_api_key_here
+# API Keys
+CLAUDE_API_KEY=your_claude_api_key_here
 PERPLEXITY_API_KEY=your_perplexity_api_key_here
 
-# Claude Configuration
-CLAUDE_MODEL=claude-3.7-sonnet
-CLAUDE_MAX_TOKENS=8000
-CLAUDE_TEMPERATURE=0.2
+# Bluefin Configuration - Choose One:
+# Option 1: SUI Client
+BLUEFIN_PRIVATE_KEY=your_private_key_here
+BLUEFIN_NETWORK=testnet  # or mainnet
 
-# ngrok Configuration
-NGROK_AUTHTOKEN=your_ngrok_authtoken_here
-NGROK_DOMAIN=your_custom_domain_if_available
+# Option 2: V2 Client
+BLUEFIN_API_KEY=your_api_key_here
+BLUEFIN_API_SECRET=your_api_secret_here
+
+# Trading Parameters
+DEFAULT_POSITION_SIZE=0.1
+DEFAULT_POSITION_SIZE_PCT=0.05
+MOCK_TRADING=true  # Set to false for real trading
 ```
 
-### 2. Build and Start Docker Containers
+### Trading Parameters (config.py)
+
+Customize trading behavior in `config.py`:
+
+```python
+# Trading parameters
+TRADING_PARAMS = {
+    "chart_symbol": "BTCUSDT",  # Symbol to analyze
+    "timeframe": "1h",          # Chart timeframe
+    "trading_symbol": "BTC-PERP", # Symbol to trade
+    "leverage": 5,              # Leverage to use
+    "stop_loss_percentage": 0.02, # Default stop loss
+    "take_profit_multiplier": 2,  # Take profit as multiple of risk
+}
+
+# Risk management parameters
+RISK_PARAMS = {
+    "max_risk_per_trade": 0.02,  # 2% of account per trade
+    "max_open_positions": 3,     # Maximum concurrent positions
+    "max_daily_loss": 0.05,      # 5% max daily drawdown
+}
+```
+
+## Usage
+
+### Starting the Agent
 
 ```bash
-docker-compose up -d
-```
-
-This will start three services:
-- `web`: Flask app that handles webhooks (port 5000)
-- `trader`: The trading agent that processes analysis requests
-- `ngrok`: Creates a public URL for your webhook
-
-### 3. Get Your Public Webhook URL
-
-Access the ngrok dashboard at http://localhost:4040 to find your public URL.
-
-### 4. Configure TradingView Alerts
-
-Set up TradingView alerts with webhooks using the following format:
-
-1. In TradingView, create a new alert
-2. Set your conditions (price action, indicators, etc.)
-3. Under "Webhook URL", enter your ngrok URL + "/webhook"
-   Example: `https://your-domain.ngrok.io/webhook`
-4. Set the alert message format to JSON:
-   ```json
-   {
-     "ticker": "{{ticker}}",
-     "price": "{{close}}",
-     "alert_type": "buy_signal",
-     "timeframe": "5m"
-   }
-   ```
-5. Save the alert
-
-## Usage
-
-Once everything is set up, the system will:
-
-1. Receive webhooks from TradingView
-2. Capture and analyze chart screenshots using Claude 3.7 Sonnet (or Perplexity if Claude fails)
-3. Generate trading recommendations
-4. Execute trades on Bluefin Exchange when appropriate
-
-## Monitoring
-
-- Logs are stored in the `logs` directory
-- Screenshots are saved in the `screenshots` directory
-- Analysis reports are saved in the `analysis` directory
-
-You can monitor these files to track the agent's performance.
-
-## Troubleshooting
-
-- **Webhook errors**: Check the `logs/webhook_server.log` file
-- **Trading errors**: Check the `logs/bluefin_agent.log` file
-- **API issues**: Verify your API keys in the `.env` file
-- **Docker issues**: Run `docker-compose logs` to see container logs
-
-## Overview
-
-Perplexity Trader is an automated trading system that:
-
-1. Captures TradingView charts for technical analysis
-2. Uses AI (Claude and Perplexity) to analyze trading opportunities
-3. Executes trades on the Bluefin Exchange based on AI recommendations
-4. Manages risk according to configurable parameters
-
-## Requirements
-
-- Python 3.8+
-- Playwright for browser automation
-- Bluefin client libraries (SUI or v2)
-
-## Installation
-
-1. Clone this repository:
-   ```
-   git clone https://github.com/yourusername/perplexitytrader.git
-   cd perplexitytrader
-   ```
-
-2. Install required Python packages:
-   ```
-   pip install -r requirements.txt
-   ```
-
-3. Install Playwright browsers:
-   ```
-   playwright install
-   ```
-
-4. Install Bluefin client libraries (choose one):
-   ```
-   # For SUI client
-   pip install git+https://github.com/fireflyprotocol/bluefin-client-python-sui.git
-   
-   # For v2 client
-   pip install git+https://github.com/fireflyprotocol/bluefin-v2-client-python.git
-   ```
-
-## Configuration
-
-1. Create a `.env` file with your API credentials:
-   ```
-   # For SUI client
-   BLUEFIN_PRIVATE_KEY=your_private_key_here
-   BLUEFIN_NETWORK=TESTNET  # or MAINNET
-   
-   # For v2 client
-   BLUEFIN_API_KEY=your_api_key_here
-   BLUEFIN_API_SECRET=your_api_secret_here
-   BLUEFIN_NETWORK=testnet  # or mainnet
-   ```
-
-2. Customize trading parameters in `config.py`:
-   - `TRADING_PARAMS`: Chart settings, trading execution parameters
-   - `RISK_PARAMS`: Risk management settings
-   - `AI_PARAMS`: AI analysis configuration
-
-## Usage
-
-Run the trading agent:
-```
+# Start the agent
 python agent.py
 ```
 
-The agent will:
-1. Connect to the Bluefin Exchange
-2. Analyze TradingView charts at regular intervals
-3. Execute trades when AI analysis meets confidence thresholds
-4. Log all activities and save trade analysis
+### Creating Alerts
 
-## Directory Structure
+The agent processes alert files placed in the `alerts` directory. Create alert files in this format:
 
-- `agent.py`: Main trading agent code
-- `config.py`: Configuration parameters
-- `logs/`: Log files
-- `screenshots/`: Chart screenshots
-- `analysis/`: Trade analysis results
+```json
+{
+  "symbol": "BTCUSDT",
+  "type": "buy_signal",
+  "timestamp": "20240605_123456"
+}
+```
 
-## API Security Best Practices
+Alert types:
+- `buy_signal`: Execute a buy/long order
+- `sell_signal`: Execute a sell/short order
+- `close_position`: Close an existing position
+- `technical_analysis`: Perform chart analysis without trading
 
-- Never commit your API keys or private keys to version control
-- Use environment variables or a `.env` file to store sensitive credentials
-- Set appropriate permissions on your `.env` file (chmod 600)
-- Regularly rotate your API keys
-- Use testnet for development and testing
+### API Endpoints
+
+Monitor the agent using the built-in API:
+
+- **Status Check**: `GET http://localhost:5000/status`
+- **Root Endpoint**: `GET http://localhost:5000/`
+
+## Development
+
+### Project Structure
+
+```
+perplexitytrader/
+├── agent.py             # Main agent code
+├── config.py            # Configuration
+├── requirements.txt     # Dependencies
+├── Dockerfile           # Docker build configuration
+├── docker-compose.yml   # Docker Compose configuration
+├── mock_perplexity.py   # Mocked Perplexity client for testing
+└── core/                # Core components
+    ├── chart_analyzer.py   # Chart analysis logic
+    └── perplexity_client.py # Perplexity API client
+```
+
+### Mock Trading Mode
+
+By default, the agent runs in mock trading mode, which simulates trades without executing real orders. This is ideal for testing strategies and configurations.
+
+To enable real trading:
+1. Set `MOCK_TRADING=false` in your `.env` file
+2. Provide valid API credentials
+
+### Playwright for Chart Capture
+
+The agent uses Playwright to capture screenshots of TradingView charts. Make sure Playwright is properly installed:
+
+```bash
+python -m playwright install chromium
+```
+
+## Security Considerations
+
+- **API Keys**: Store securely in environment variables, never hardcode
+- **Risk Limits**: Configure appropriate risk parameters
+- **Testing**: Always test new strategies in mock mode first
+- **Rate Limits**: Be aware of API rate limits for Claude and Perplexity
+- **Permissions**: Use least-privilege access for API keys
+
+## Troubleshooting
+
+### Common Issues
+
+1. **Missing Screenshots**:
+   - Check Playwright installation
+   - Verify TradingView URL access
+
+2. **Authentication Errors**:
+   - Verify API keys in .env file
+   - Check for expired or revoked credentials
+
+3. **No Trades Executed**:
+   - Confirm `MOCK_TRADING=false` for real trading
+   - Check alert files format and processing
+
+### Logs
+
+Logs are stored in the `logs/` directory and provide detailed information about the agent's activities.
 
 ## License
 
-MIT
+[MIT License](LICENSE)
 
-## Disclaimer
+## Acknowledgements
 
-This software is for educational purposes only. Trading cryptocurrencies involves significant risk. Use at your own risk.
-
-## AI Decision Process
-
-The Perplexity Trader uses a two-step AI process for making trading decisions:
-
-1. **Claude 3.7 Sonnet**: The primary AI for analyzing market data and generating initial trading decisions. Claude 3.7 Sonnet is Anthropic's most advanced model, capable of nuanced reasoning and analysis. It receives market data as input and outputs a structured decision including the action (buy/sell/hold) and reasoning.
-
-2. **Perplexity**: Acts as a confirmation step for Claude's decisions. The initial decision from Claude is passed to Perplexity, which assesses if it agrees with the decision and reasoning. If Perplexity confirms the decision, the trade is executed. If Perplexity disagrees, the trade is cancelled or modified based on predefined logic.
-
-This combination of Claude's deep reasoning capabilities and Perplexity's confirmation step helps ensure trading decisions are robust and well-justified. The two AIs provide an additional layer of scrutiny to avoid impulsive or poorly reasoned trades.
-
-Configuration for the AI models can be found in `config.py`. The `CLAUDE_CONFIG` dictionary specifies the model version, API key, and generation parameters for Claude. Perplexity configuration is under `PERPLEXITY_CONFIG`.
+- [Bluefin Exchange](https://bluefin.io/) for their trading API
+- [Anthropic](https://www.anthropic.com/) for Claude AI
+- [Perplexity](https://www.perplexity.ai/) for their AI services
+- [TradingView](https://www.tradingview.com/) for chart data

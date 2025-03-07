@@ -62,7 +62,7 @@ from typing import Dict, List, Optional, Union, Any, TypeVar, Type, cast
 import requests
 import base64
 import aiohttp
-from anthropic import Client
+from anthropic import Client, RateLimitError, APITimeoutError
 import re
 import tempfile
 import argparse
@@ -145,7 +145,10 @@ ORDER_TYPE = ORDER_TYPE_ENUM
 
 # Type definitions to help with linting
 # Use Any instead of TypeVar for better compatibility with linter
-BluefinClientType = TypeVar('BluefinClientType')
+BluefinClientT = TypeVar('BluefinClientT')
+
+# Blueprint type for BluefinClient - this should be first
+BluefinClientType: Any = None
 
 # Create a class that can be used as a type hint for BluefinClient
 class BaseBluefinClient:
@@ -153,8 +156,19 @@ class BaseBluefinClient:
     async def get_account_equity(self): pass
     async def create_order(self, **kwargs): pass
 
-# Define BluefinClient as None initially
-BluefinClient = None
+# Define BluefinClient as Any initially
+BluefinClient: Any = None
+
+# Initialize global variables
+claude_client = None
+
+# Import Anthropic API for Claude
+try:
+    from anthropic import Client, RateLimitError, APITimeoutError
+    CLAUDE_AVAILABLE = True
+except ImportError:
+    logger.warning("Anthropic Python SDK not installed. Claude AI will not be available.")
+    CLAUDE_AVAILABLE = False
 
 # Try to import SUI client first
 try:
@@ -487,15 +501,101 @@ SYMBOL_PARAMS = {
     }
 }
 
-# Initialize Bluefin client
-client = None
-if BLUEFIN_CLIENT_SUI_AVAILABLE:
-    client = BluefinClient(private_key=os.getenv("BLUEFIN_PRIVATE_KEY"), network=Networks.MAINNET)
-elif BLUEFIN_V2_CLIENT_AVAILABLE:
-    client = BluefinClient(api_key=os.getenv("BLUEFIN_API_KEY"), api_secret=os.getenv("BLUEFIN_API_SECRET"))
-else:
-    logger.warning("No Bluefin client available, running in simulation mode")
+# Add functions for client initialization
+def init_bluefin_client():
+    """Initialize and return a BluefinClient instance based on available implementations"""
+    global BluefinClient, Networks, BLUEFIN_CLIENT_SUI_AVAILABLE, BLUEFIN_V2_CLIENT_AVAILABLE
+    
+    # Set default to Mock for safety
     client = MockBluefinClient()
+    
+    # Use MockNetworks as a fallback
+    if Networks is None:
+        Networks = MockNetworks
+    
+    try:
+        # First try SUI client
+        if BLUEFIN_CLIENT_SUI_AVAILABLE and BluefinClient is not None:
+            private_key = os.getenv("BLUEFIN_PRIVATE_KEY")
+            network = os.getenv("BLUEFIN_NETWORK", "testnet").lower()
+            network_enum = Networks.MAINNET if network == "mainnet" else Networks.TESTNET
+            
+            if private_key:
+                try:
+                    client = BluefinClient(private_key=private_key, network=network_enum)
+                    logger.info(f"Initialized Bluefin SUI client on {network}")
+                except Exception as e:
+                    logger.error(f"Failed to initialize SUI client: {e}")
+                    # Keep the default MockBluefinClient
+            else:
+                logger.warning("Missing Bluefin private key, falling back to mock client")
+                # Keep the default MockBluefinClient
+        # Then try V2 client
+        elif BLUEFIN_V2_CLIENT_AVAILABLE and BluefinClient is not None:
+            api_key = os.getenv("BLUEFIN_API_KEY")
+            api_secret = os.getenv("BLUEFIN_API_SECRET")
+            
+            if api_key and api_secret:
+                try:
+                    client = BluefinClient(api_key=api_key, api_secret=api_secret)
+                    logger.info("Initialized Bluefin V2 client")
+                except Exception as e:
+                    logger.error(f"Failed to initialize V2 client: {e}")
+                    # Keep the default MockBluefinClient
+            else:
+                logger.warning("Missing Bluefin API credentials, falling back to mock client")
+                # Keep the default MockBluefinClient
+        # Fall back to mock client
+        else:
+            logger.warning("No Bluefin client available, using mock implementation")
+            # Keep the default MockBluefinClient
+    except Exception as e:
+        logger.error(f"Error initializing Bluefin client: {e}")
+        logger.warning("Falling back to mock client due to initialization error")
+        # Keep the default MockBluefinClient
+    
+    return client
+
+def init_claude_client():
+    """Initialize the Claude API client using environment variables"""
+    global claude_client
+    
+    try:
+        # Check if Claude is available
+        if not CLAUDE_AVAILABLE:
+            logger.warning("Claude API not available - anthropic package not installed")
+            return None
+            
+        # Check for API key in environment variables
+        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        
+        if not api_key or api_key == "your_api_key_here":
+            logger.warning("Claude API key not found or not set in environment variables")
+            return None
+        
+        # Initialize Claude client with API key
+        logger.info("Initializing Claude client with Anthropic API key")
+        claude_client = Client(api_key=api_key, max_retries=3)
+        
+        return claude_client
+    except Exception as e:
+        logger.error(f"Failed to initialize Claude client: {e}")
+        return None
+
+def init_clients():
+    """Initialize API clients"""
+    # Define a global client for the whole application
+    global client, claude_client
+    
+    # Initialize Bluefin client
+    logger.info("Initializing Bluefin client")
+    client = init_bluefin_client()
+    
+    # Initialize Claude client 
+    logger.info("Initializing Claude client")
+    claude_client = init_claude_client()
+    
+    return client
 
 def get_timestamp():
     """Get current timestamp in YYYYMMDD_HHMMSS format"""
@@ -666,27 +766,35 @@ Format your analysis in a structured way with clear sections."""
         
         # Handle different possible response structures
         try:
+            # If response is an object with content attribute
             if hasattr(response, "content"):
-                for content_block in response.content:
-                    # Handle dict-style content
-                    if isinstance(content_block, dict) and "text" in content_block:
-                        analysis_text += content_block["text"]
-                    # Handle object-style content with text attribute
-                    elif hasattr(content_block, "type") and content_block.type == "text":
-                        if hasattr(content_block, "text"):
-                            analysis_text += content_block.text
-                    # Handle string content 
-                    elif isinstance(content_block, str):
-                        analysis_text += content_block
-            elif isinstance(response, dict) and "content" in response:
-                if isinstance(response["content"], list):
-                    for block in response["content"]:
+                content = response.content
+                if isinstance(content, list):
+                    for block in content:
                         if isinstance(block, dict) and "text" in block:
                             analysis_text += block["text"]
-                elif isinstance(response["content"], str):
-                    analysis_text = response["content"]
+                        elif hasattr(block, "type") and getattr(block, "type", "") == "text":
+                            # Use getattr with default to avoid attribute errors
+                            text = getattr(block, "text", "")
+                            if text:
+                                analysis_text += text
+                        elif isinstance(block, str):
+                            analysis_text += block
+            # If response is a dictionary
+            elif isinstance(response, dict) and "content" in response:
+                content = response["content"]
+                if isinstance(content, list):
+                    for block in content:
+                        if isinstance(block, dict) and "text" in block:
+                            analysis_text += block["text"]
+                elif isinstance(content, str):
+                    analysis_text = content
+                    
+            # If no text extracted but we have a response, use string representation as fallback
+            if not analysis_text and response:
+                analysis_text = str(response)
         except Exception as e:
-            logger.error(f"Error parsing Claude response: {e}")
+            logger.error(f"Error parsing Claude response: {str(e)}")
             # Fallback to string representation
             analysis_text = str(response)
                 
@@ -1095,6 +1203,53 @@ async def process_alerts():
     
     # Small delay to avoid high CPU usage
     await asyncio.sleep(1)
+
+# Define a main function for running the agent
+async def main():
+    setup_logging()
+    logger.info("Starting agent...")
+    
+    # Create necessary directories
+    os.makedirs("alerts", exist_ok=True)
+    os.makedirs("logs", exist_ok=True)
+    
+    # Initialize clients
+    init_clients()
+    
+    # Start API server in the background
+    api_task = asyncio.create_task(start_api_server())
+    
+    # Start alert processing loop
+    while True:
+        try:
+            await process_alerts()
+        except Exception as e:
+            logger.error(f"Error processing alerts: {e}")
+        await asyncio.sleep(1)
+
+# Define FastAPI app
+app = FastAPI(title="Trading Agent API", description="API for the trading agent")
+
+@app.get("/")
+async def root():
+    return {"status": "online", "message": "Trading Agent API is running"}
+
+@app.get("/status")
+async def status():
+    return {
+        "status": "online",
+        "mock_trading": True,
+        "timestamp": get_timestamp()
+    }
+
+async def start_api_server():
+    """Start the API server using uvicorn"""
+    try:
+        config = uvicorn.Config(app, host="0.0.0.0", port=5000)
+        server = uvicorn.Server(config)
+        await server.serve()
+    except Exception as e:
+        logger.error(f"Error starting API server: {e}")
 
 if __name__ == "__main__":
     asyncio.run(main())
