@@ -13,9 +13,8 @@ python-dotenv==0.19.2
 # Browser automation
 playwright==1.39.0
 
-# Bluefin API clients (commented - to be installed manually)
-# git+https://github.com/fireflyprotocol/bluefin-client-python-sui.git
-# git+https://github.com/fireflyprotocol/bluefin-v2-client-python.git
+# Bluefin API clients
+git+https://github.com/fireflyprotocol/bluefin-v2-client-python.git
 
 # Data processing
 python-dateutil==2.8.2
