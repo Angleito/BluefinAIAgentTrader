@@ -81,7 +81,7 @@ services:
       - ./logs:/app/logs
       - ./alerts:/app/alerts
     env_file:
-      - .env
+      - .env.prod
     environment:
       - FLASK_ENV=production
       - FLASK_DEBUG=false
@@ -111,11 +111,12 @@ services:
       - ./config:/app/config
       - ./data:/app/data
     env_file:
-      - .env
+      - .env.prod
     environment:
       - FLASK_ENV=production
       - FLASK_DEBUG=false
       - MOCK_TRADING=False
+      - BLUEFIN_NETWORK=${BLUEFIN_NETWORK:-testnet}
     ports:
       - "5002:5002"
     restart: always
