@@ -248,6 +248,7 @@ class MockBluefinClient:
             'SOL-PERP': 5,
             'BNB-PERP': 5
         }
+        self.orders = []  # Store mock orders
         logger.info(f"Initialized MockBluefinClient on {self.network}")
         
     async def init(self, onboard_user=False):
@@ -355,68 +356,113 @@ class MockBluefinClient:
         logger.info(f"[MOCK] Getting account equity: {equity}")
         return equity
         
-    async def create_order(self, symbol, side, size, **kwargs):
-        """Mock implementation of create_order"""
-        order_id = f"mock_order_{get_timestamp()}"
-        logger.info(f"[MOCK] Creating {side} order for {symbol}, size: {size}")
+    def create_order_signature_request(self, symbol, side, size, price=None, order_type="MARKET", **kwargs):
+        """Mock implementation of create_order_signature_request
+        Based on https://bluefin-exchange.readme.io/reference/sign-post-orders
+        """
+        logger.info(f"[MOCK] Creating order signature request for {side} {size} {symbol}")
+        return MockOrderSignatureRequest(
+            symbol=symbol,
+            side=side,
+            size=size,
+            price=price,
+            order_type=order_type,
+            leverage=kwargs.get("leverage", 5),
+            **kwargs
+        )
+    
+    def create_signed_order(self, signature_request):
+        """Mock implementation of create_signed_order
+        Based on https://bluefin-exchange.readme.io/reference/sign-post-orders
+        """
+        logger.info(f"[MOCK] Creating signed order from signature request")
+        order_hash = signature_request.get_order_hash()
+        signature = f"0xMOCK_SIGNATURE_{get_timestamp()}"
+        
         return {
-            "order_id": order_id,
-            "symbol": symbol,
-            "side": side,
-            "size": size,
-            "status": "filled",
-            "type": kwargs.get("type", "LIMIT"),
-            "price": kwargs.get("price", 0.0),
+            "orderHash": order_hash,
+            "signature": signature,
+            "symbol": signature_request.symbol,
+            "side": signature_request.side,
+            "size": signature_request.size,
+            "price": signature_request.price,
+            "orderType": signature_request.order_type,
+            "leverage": signature_request.leverage
+        }
+    
+    async def post_signed_order(self, signed_order):
+        """Mock implementation of post_signed_order
+        Based on https://bluefin-exchange.readme.io/reference/sign-post-orders
+        """
+        logger.info(f"[MOCK] Posting signed order to exchange")
+        order_id = f"order_{get_timestamp()}"
+        
+        # Create order response
+        order = {
+            "id": order_id,
+            "orderHash": signed_order["orderHash"],
+            "symbol": signed_order["symbol"],
+            "side": signed_order["side"],
+            "size": signed_order["size"],
+            "price": signed_order["price"],
+            "orderType": signed_order["orderType"],
+            "leverage": signed_order["leverage"],
+            "status": "OPEN",
             "timestamp": get_timestamp()
         }
         
-    async def place_order(self, **kwargs):
-        """Mock implementation of place_order"""
-        # Just redirect to create_order for consistency
-        return await self.create_order(
-            kwargs.get("symbol", "UNKNOWN"),
-            kwargs.get("side", "BUY"),
-            kwargs.get("size", 0.1),
-            **kwargs
-        )
+        # Store order
+        self.orders.append(order)
         
-    async def close_session(self):
-        """Mock implementation of close_session"""
-        logger.info("[MOCK] Closing session")
-        return True
-        
-    async def get_user_positions(self):
-        """Mock implementation of get_user_positions"""
-        return []
-        
-    async def get_user_margin(self):
-        """Mock implementation of get_user_margin"""
-        return {"available": 10000.0, "total": 10000.0}
-        
-    async def get_user_leverage(self, symbol):
-        """Mock implementation of get_user_leverage
-        Based on https://bluefin-exchange.readme.io/reference/get-adjust-leverage
+        return order
+    
+    async def create_order(self, symbol, side, size, **kwargs):
+        """Mock implementation of create_order - now using the signature flow
+        Based on https://bluefin-exchange.readme.io/reference/sign-post-orders
         """
-        # Return default leverage if symbol not found
-        leverage = self.leverage_settings.get(symbol, 5)
-        logger.info(f"[MOCK] Getting leverage for {symbol}: {leverage}x")
-        return leverage
-        
-    async def adjust_leverage(self, symbol, leverage):
-        """Mock implementation of adjust_leverage
-        Based on https://bluefin-exchange.readme.io/reference/get-adjust-leverage
-        """
-        if leverage < 1 or leverage > 20:
-            raise ValueError(f"Leverage must be between 1 and 20, got {leverage}")
+        try:
+            # Create order signature request
+            signature_request = self.create_order_signature_request(
+                symbol=symbol,
+                side=side,
+                size=size,
+                price=kwargs.get("price", None),
+                order_type=kwargs.get("type", "MARKET"),
+                leverage=kwargs.get("leverage", 5)
+            )
             
-        # Update leverage setting
-        self.leverage_settings[symbol] = leverage
-        logger.info(f"[MOCK] Adjusted leverage for {symbol} to {leverage}x")
-        return {
-            "symbol": symbol,
-            "leverage": leverage,
-            "success": True
-        }
+            # Create signed order
+            signed_order = self.create_signed_order(signature_request)
+            
+            # Post signed order
+            order = await self.post_signed_order(signed_order)
+            
+            logger.info(f"[MOCK] Created order: {order}")
+            return order
+        except Exception as e:
+            logger.error(f"[MOCK] Error creating order: {e}")
+            raise
+    
+    async def get_orders(self):
+        """Mock implementation of get_orders"""
+        logger.info(f"[MOCK] Getting orders, count: {len(self.orders)}")
+        return self.orders
+    
+    async def cancel_order(self, order_id=None, order_hash=None):
+        """Mock implementation of cancel_order
+        Based on https://bluefin-exchange.readme.io/reference/sign-post-orders
+        """
+        logger.info(f"[MOCK] Cancelling order: {order_id or order_hash}")
+        
+        # Find order to cancel
+        for i, order in enumerate(self.orders):
+            if (order_id and order["id"] == order_id) or (order_hash and order["orderHash"] == order_hash):
+                # Remove from orders list
+                cancelled_order = self.orders.pop(i)
+                cancelled_order["status"] = "CANCELLED"
+                return {"success": True, "order": cancelled_order}
+        
+        return {"success": False, "error": "Order not found"}
 
 # Define mock client for testing if no libraries are available
 if BluefinClient is None:
@@ -469,7 +515,7 @@ if BluefinClient is None:
         async def post_signed_order(self, signed_order):
             print("Mock: Posting signed order")
             return {"orderId": "mock_order_id"}
-            
+
         async def get_account_info(self):
             print("Mock: Getting account info")
             return {
@@ -486,18 +532,30 @@ if BluefinClient is None:
 
 # Define a mock OrderSignatureRequest class for simulation
 class MockOrderSignatureRequest:
-    """Mock OrderSignatureRequest for simulation"""
-    def __init__(self, *args, **kwargs):
-        self.args = args
+    """Mock implementation of order signature request"""
+    
+    def __init__(self, symbol, side, size, price=None, order_type="MARKET", leverage=5, **kwargs):
+        self.symbol = symbol
+        self.side = side
+        self.size = size
+        self.price = price if price is not None else 0.0
+        self.order_type = order_type
+        self.leverage = leverage
+        self.timestamp = int(time.time() * 1000)
+        self.expiration = self.timestamp + 60000  # 1 minute expiration
         self.kwargs = kwargs
         
     def get_signature_hash(self):
-        """Return a mock signature hash"""
-        return "0x" + "0" * 64
+        """Get the signature hash for the order"""
+        # In a real implementation, this would create a hash of the order parameters
+        # For mock purposes, we'll just create a unique string
+        return f"0xSIGHASH_{self.symbol}_{self.side}_{self.size}_{self.timestamp}"
         
     def get_order_hash(self):
-        """Return a mock order hash"""
-        return "0x" + "1" * 64
+        """Get the order hash"""
+        # In a real implementation, this would be a hash of the order parameters
+        # For mock purposes, we'll just create a unique string
+        return f"0xORDERHASH_{self.symbol}_{self.side}_{self.size}_{self.timestamp}"
 
 # Set OrderSignatureRequest to the mock class by default
 OrderSignatureRequest = MockOrderSignatureRequest
@@ -1186,23 +1244,24 @@ def parse_perplexity_analysis(analysis, ticker):
         
     return recommendation
 
-async def execute_trade(symbol: str, side: str, position_size: float = None, risk_percentage: float = None, stop_loss_percentage: float = None, leverage: int = None):
+async def execute_trade(symbol: str, side: str, position_size: float = None, risk_percentage: float = None, stop_loss_percentage: float = None, leverage: int = None, order_type: str = "MARKET", price: float = None):
     """
     Execute a real trade on the Bluefin exchange.
     
-    This function places a market order on Bluefin based on the provided parameters:
-    - symbol: The trading pair to trade (e.g., "SUI/USD")
+    This function places an order on Bluefin based on the provided parameters:
+    - symbol: The trading pair to trade (e.g., "SUI-PERP")
     - side: The direction of the trade ("BUY" or "SELL")
     - position_size: The size of the position to open (optional, will be calculated if not provided)
     - risk_percentage: The percentage of account to risk (optional)
     - stop_loss_percentage: The percentage for stop loss (optional)
     - leverage: The leverage to use for the trade (optional, default from config)
+    - order_type: The type of order ("MARKET" or "LIMIT")
+    - price: The price for limit orders (required for LIMIT orders)
     
-    It first initializes the Bluefin client (if not already initialized) based on the available
-    client libraries and configuration. It then attempts to place the order using the appropriate
-    method for the client (create_order or place_order).
-    
-    If any errors occur during the process, it logs the error and creates a mock order response.
+    It follows the Bluefin order flow:
+    1. Create an order signature request
+    2. Sign the order
+    3. Post the signed order to the exchange
     
     Returns:
         dict: The order response from Bluefin (real or mock)
@@ -1217,7 +1276,7 @@ async def execute_trade(symbol: str, side: str, position_size: float = None, ris
                 stop_loss_percentage=stop_loss_percentage
             )
             
-        logger.info(f"Executing real trade: {side} {position_size} of {symbol}")
+        logger.info(f"Executing trade: {side} {position_size} of {symbol} with order type {order_type}")
         
         # Get parameters for symbol
         leverage_value = leverage or int(os.getenv("DEFAULT_LEVERAGE", "5"))
@@ -1259,14 +1318,43 @@ async def execute_trade(symbol: str, side: str, position_size: float = None, ris
         # Ensure leverage is set correctly
         await ensure_leverage(symbol, leverage_value)
         
-        # Create order - handling different client implementations
+        # For LIMIT orders, ensure price is provided
+        if order_type == "LIMIT" and price is None:
+            # Get current market price as a fallback
+            price = await get_market_price(symbol)
+            logger.warning(f"No price provided for LIMIT order, using market price: {price}")
+        
+        # Create order using the signature flow
         try:
-            # Try direct method
-            if hasattr(client, "create_order"):
+            # Check if client supports the signature flow
+            if hasattr(client, "create_order_signature_request") and hasattr(client, "create_signed_order") and hasattr(client, "post_signed_order"):
+                # Step 1: Create order signature request
+                signature_request = client.create_order_signature_request(
+                    symbol=symbol,
+                    side=side,
+                    size=position_size,
+                    price=price,
+                    order_type=order_type,
+                    leverage=leverage_value
+                )
+                logger.info(f"Created order signature request")
+                
+                # Step 2: Sign the order
+                signed_order = client.create_signed_order(signature_request)
+                logger.info(f"Created signed order: {signed_order}")
+                
+                # Step 3: Post the signed order
+                order = await client.post_signed_order(signed_order)
+                logger.info(f"Posted signed order, response: {order}")
+                
+            # Fallback to direct methods if signature flow not supported
+            elif hasattr(client, "create_order"):
                 order = await client.create_order(
                     symbol=symbol,
                     side=side,
                     size=position_size,
+                    type=order_type,
+                    price=price,
                     leverage=leverage_value
                 )
             elif hasattr(client, "place_order"):
@@ -1274,6 +1362,8 @@ async def execute_trade(symbol: str, side: str, position_size: float = None, ris
                     symbol=symbol,
                     side=side, 
                     size=position_size,
+                    type=order_type,
+                    price=price,
                     leverage=leverage_value
                 )
             else:
@@ -1283,6 +1373,8 @@ async def execute_trade(symbol: str, side: str, position_size: float = None, ris
                     "symbol": symbol,
                     "side": side,
                     "size": position_size,
+                    "type": order_type,
+                    "price": price,
                     "status": "created"
                 }
                 logger.warning("Using fallback mock order creation")
@@ -1294,6 +1386,8 @@ async def execute_trade(symbol: str, side: str, position_size: float = None, ris
                 "symbol": symbol,
                 "side": side,
                 "size": position_size,
+                "type": order_type,
+                "price": price,
                 "status": "error",
                 "error": str(e)
             }
@@ -1310,6 +1404,8 @@ async def execute_trade(symbol: str, side: str, position_size: float = None, ris
             "symbol": symbol,
             "side": side,
             "size": position_size if position_size is not None else 0,
+            "type": order_type,
+            "price": price,
             "status": "error",
             "error": str(e)
         }

@@ -117,6 +117,47 @@ async def test_bluefin_v2_client():
         except Exception as e:
             logger.error(f"❌ Error testing leverage functions: {e}")
         
+        # Test order signature flow
+        # Based on https://bluefin-exchange.readme.io/reference/sign-post-orders
+        try:
+            # Test symbol
+            test_symbol = "SUI-PERP"
+            
+            # Step 1: Create order signature request
+            logger.info("Creating order signature request...")
+            signature_request = client.create_order_signature_request(
+                symbol=test_symbol,
+                side="BUY",
+                size=0.1,  # Small size for testing
+                price=None,  # Market order
+                order_type="MARKET",
+                leverage=5
+            )
+            logger.info(f"✅ Created order signature request")
+            
+            # Step 2: Sign the order
+            logger.info("Creating signed order...")
+            signed_order = client.create_signed_order(signature_request)
+            logger.info(f"✅ Created signed order: {signed_order}")
+            
+            # Step 3: Post the signed order
+            logger.info("Posting signed order...")
+            order_response = await client.post_signed_order(signed_order)
+            logger.info(f"✅ Posted signed order, response: {order_response}")
+            
+            # Get orders
+            logger.info("Getting orders...")
+            orders = await client.get_orders()
+            logger.info(f"✅ Got orders: {len(orders)} orders")
+            
+            # Cancel the order if it was created successfully
+            if order_response and "id" in order_response:
+                logger.info(f"Cancelling order {order_response['id']}...")
+                cancel_result = await client.cancel_order(order_id=order_response["id"])
+                logger.info(f"✅ Cancelled order: {cancel_result}")
+        except Exception as e:
+            logger.error(f"❌ Error testing order signature flow: {e}")
+        
         return True
     except ImportError as e:
         logger.error(f"❌ Failed to import Bluefin v2 client: {e}")
