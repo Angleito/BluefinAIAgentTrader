@@ -263,6 +263,80 @@ class MockBluefinClient:
             "account_type": "mock"
         }
         
+    async def get_margin_bank_balance(self):
+        """Mock implementation of get_margin_bank_balance
+        Based on https://bluefin-exchange.readme.io/reference/get-deposit-withdraw-usdc-from-marginbank
+        """
+        return 5000.0
+        
+    async def deposit_margin_to_bank(self, amount):
+        """Mock implementation of deposit_margin_to_bank
+        Based on https://bluefin-exchange.readme.io/reference/get-deposit-withdraw-usdc-from-marginbank
+        """
+        logger.info(f"[MOCK] Depositing {amount} USDC to margin bank")
+        return amount
+        
+    async def withdraw_margin_from_bank(self, amount):
+        """Mock implementation of withdraw_margin_from_bank
+        Based on https://bluefin-exchange.readme.io/reference/get-deposit-withdraw-usdc-from-marginbank
+        """
+        logger.info(f"[MOCK] Withdrawing {amount} USDC from margin bank")
+        return amount
+        
+    async def withdraw_all_margin_from_bank(self):
+        """Mock implementation of withdraw_all_margin_from_bank
+        Based on https://bluefin-exchange.readme.io/reference/get-deposit-withdraw-usdc-from-marginbank
+        """
+        logger.info("[MOCK] Withdrawing all USDC from margin bank")
+        balance = await self.get_margin_bank_balance()
+        return balance
+        
+    async def get_orderbook(self, symbol):
+        """Mock implementation of get_orderbook"""
+        # Create mock orderbook data with realistic structure
+        mock_prices = {
+            'BTC-PERP': {'bid': 50000, 'ask': 50100},
+            'ETH-PERP': {'bid': 3000, 'ask': 3010},
+            'SUI-PERP': {'bid': 1.5, 'ask': 1.51},
+            'SOL-PERP': {'bid': 100, 'ask': 101},
+            'BNB-PERP': {'bid': 400, 'ask': 402}
+        }
+        
+        # Extract base symbol from the full symbol
+        base_symbol = symbol.split('-')[0] if '-' in symbol else symbol.split('/')[0] if '/' in symbol else symbol
+        
+        # Find matching price or use default
+        price_data = None
+        for key, data in mock_prices.items():
+            if base_symbol in key:
+                price_data = data
+                break
+        
+        if not price_data:
+            price_data = {'bid': 100, 'ask': 101}  # Default fallback
+            
+        # Create mock orderbook with realistic structure
+        bid_price = price_data['bid']
+        ask_price = price_data['ask']
+        
+        return {
+            'bids': [
+                [str(bid_price), '1.0'],
+                [str(bid_price * 0.99), '2.0'],
+                [str(bid_price * 0.98), '3.0'],
+                [str(bid_price * 0.97), '5.0'],
+                [str(bid_price * 0.96), '10.0']
+            ],
+            'asks': [
+                [str(ask_price), '1.0'],
+                [str(ask_price * 1.01), '2.0'],
+                [str(ask_price * 1.02), '3.0'],
+                [str(ask_price * 1.03), '5.0'],
+                [str(ask_price * 1.04), '10.0']
+            ],
+            'timestamp': int(time.time() * 1000)
+        }
+        
     async def close_position(self, position_id):
         """Mock implementation of close_position"""
         logger.info(f"[MOCK] Closing position {position_id}")
@@ -1084,14 +1158,16 @@ def parse_perplexity_analysis(analysis, ticker):
         
     return recommendation
 
-async def execute_trade(symbol: str, side: str, position_size: float):
+async def execute_trade(symbol: str, side: str, position_size: float = None, risk_percentage: float = None, stop_loss_percentage: float = None):
     """
     Execute a real trade on the Bluefin exchange.
     
     This function places a market order on Bluefin based on the provided parameters:
     - symbol: The trading pair to trade (e.g., "SUI/USD")
     - side: The direction of the trade ("BUY" or "SELL")
-    - position_size: The size of the position to open, as a percentage of the account balance
+    - position_size: The size of the position to open (optional, will be calculated if not provided)
+    - risk_percentage: The percentage of account to risk (optional)
+    - stop_loss_percentage: The percentage for stop loss (optional)
     
     It first initializes the Bluefin client (if not already initialized) based on the available
     client libraries and configuration. It then attempts to place the order using the appropriate
@@ -1103,6 +1179,15 @@ async def execute_trade(symbol: str, side: str, position_size: float):
         dict: The order response from Bluefin (real or mock)
     """
     try:
+        # Calculate position size if not provided
+        if position_size is None:
+            position_size = await calculate_position_size(
+                symbol=symbol,
+                side=side,
+                risk_percentage=risk_percentage,
+                stop_loss_percentage=stop_loss_percentage
+            )
+            
         logger.info(f"Executing real trade: {side} {position_size} of {symbol}")
         
         # Get parameters for symbol
@@ -1399,6 +1484,122 @@ async def start_api_server():
         await server.serve()
     except Exception as e:
         logger.error(f"Error starting API server: {e}")
+
+async def calculate_position_size(symbol, side, risk_percentage=None, stop_loss_percentage=None):
+    """
+    Calculate the appropriate position size based on account balance and risk parameters.
+    
+    Args:
+        symbol (str): The trading symbol (e.g., 'BTC-PERP')
+        side (str): The order side ('BUY' or 'SELL')
+        risk_percentage (float, optional): The percentage of account to risk (0.01 = 1%)
+        stop_loss_percentage (float, optional): The percentage for stop loss (0.05 = 5%)
+        
+    Returns:
+        float: The calculated position size
+    """
+    global client
+    
+    # Use default risk parameters if not provided
+    risk_percentage = risk_percentage or RISK_PARAMS.get("max_risk_per_trade", 0.02)
+    stop_loss_percentage = stop_loss_percentage or RISK_PARAMS.get("stop_loss_percentage", 0.05)
+    
+    try:
+        # Get margin bank balance
+        # Based on https://bluefin-exchange.readme.io/reference/get-deposit-withdraw-usdc-from-marginbank
+        if hasattr(client, 'get_margin_bank_balance'):
+            margin_balance = await client.get_margin_bank_balance()
+            logger.info(f"Margin bank balance: {margin_balance} USDC")
+        else:
+            # Fallback to account details
+            account_details = await client.get_account_details()
+            margin_balance = account_details.get("margin_balance", 0)
+            logger.info(f"Account margin balance: {margin_balance} USDC")
+        
+        # Calculate the dollar amount to risk
+        risk_amount = margin_balance * risk_percentage
+        logger.info(f"Risking {risk_percentage*100}% of balance: {risk_amount} USDC")
+        
+        # Get current market price for the symbol
+        current_price = await get_market_price(symbol)
+        
+        # Calculate position size based on risk and stop loss
+        # Formula: Position Size = Risk Amount / (Current Price * Stop Loss Percentage)
+        position_size = risk_amount / (current_price * stop_loss_percentage)
+        
+        # Apply max position size limit
+        max_position_size = TRADING_PARAMS.get("max_position_size_usd", 1000) / current_price
+        position_size = min(position_size, max_position_size)
+        
+        # Round to appropriate precision (e.g., 0.001 BTC)
+        position_size = round(position_size, 3)
+        
+        logger.info(f"Calculated position size: {position_size} for {symbol} {side}")
+        return position_size
+    
+    except Exception as e:
+        logger.error(f"Error calculating position size: {e}")
+        logger.error(traceback.format_exc())
+        # Return a safe default
+        return 0.001  # Minimal position size as fallback
+
+async def get_market_price(symbol):
+    """
+    Get the current market price for a symbol.
+    
+    Args:
+        symbol (str): The trading symbol (e.g., 'BTC-PERP')
+        
+    Returns:
+        float: The current market price
+    """
+    global client
+    
+    try:
+        # Try to get market price from Bluefin client
+        if hasattr(client, 'get_market_price'):
+            price = await client.get_market_price(symbol)
+            logger.info(f"Got market price for {symbol}: {price}")
+            return price
+        
+        # Try to get orderbook and use mid price
+        if hasattr(client, 'get_orderbook'):
+            orderbook = await client.get_orderbook(symbol)
+            if orderbook and 'bids' in orderbook and 'asks' in orderbook:
+                if orderbook['bids'] and orderbook['asks']:
+                    bid = float(orderbook['bids'][0][0])
+                    ask = float(orderbook['asks'][0][0])
+                    mid_price = (bid + ask) / 2
+                    logger.info(f"Calculated mid price for {symbol}: {mid_price}")
+                    return mid_price
+        
+        # Fallback to default prices for common symbols
+        default_prices = {
+            'BTC-PERP': 50000,
+            'ETH-PERP': 3000,
+            'SUI-PERP': 1.5,
+            'SOL-PERP': 100,
+            'BNB-PERP': 400
+        }
+        
+        # Extract base symbol from the full symbol
+        base_symbol = symbol.split('-')[0] if '-' in symbol else symbol.split('/')[0] if '/' in symbol else symbol
+        
+        # Try to find a matching default price
+        for key, price in default_prices.items():
+            if base_symbol in key:
+                logger.warning(f"Using default price for {symbol}: {price}")
+                return price
+        
+        # Last resort fallback
+        logger.warning(f"No price found for {symbol}, using default price: 100")
+        return 100
+    
+    except Exception as e:
+        logger.error(f"Error getting market price: {e}")
+        logger.error(traceback.format_exc())
+        # Return a safe default
+        return 100
 
 if __name__ == "__main__":
     asyncio.run(main())
