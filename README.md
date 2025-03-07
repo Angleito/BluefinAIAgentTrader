@@ -2,7 +2,7 @@
 
 An advanced trading agent that uses Claude and Perplexity AI to analyze TradingView charts and execute trades on the Bluefin Exchange.
 
-![Trading Agent Architecture](https://via.placeholder.com/800x400?text=Trading+Agent+Architecture)
+![Trading Agent Architecture](architecture_diagram.png)
 
 ## Features
 
@@ -20,11 +20,16 @@ The trading agent consists of these key components:
 
 ### Core Components
 
-1. **Bluefin Client Interface**: Connect to trading platforms
-2. **Chart Analysis System**: AI-powered technical analysis
-3. **Alert Processing System**: Handle trading signals
-4. **Risk Management System**: Control position sizing and risk
-5. **API Server**: Monitor and control the agent
+1. **Bluefin Client Interface**: Connect to trading platforms (`core/bluefin_client.py`)
+2. **Chart Analysis System**: AI-powered technical analysis (`core/chart_analyzer.py`, `core/perplexity_client.py`)
+3. **Alert Processing System**: Handle trading signals (`core/alert_processor.py`)
+4. **Risk Management System**: Control position sizing and risk (`core/risk_manager.py`)
+5. **API Server**: Monitor and control the agent (`api/server.py`)
+
+Additional files:
+- `config.py`: Configuration settings
+- `mock_perplexity.py`: Mocked Perplexity client for testing
+- `test_*.py`: Unit and integration tests
 
 ### Trading Process Flow
 
@@ -146,6 +151,12 @@ The agent processes alert files placed in the `alerts` directory. Create alert f
 }
 ```
 
+Example alert files:
+- `alerts/example_buy_signal.json`
+- `alerts/example_sell_signal.json`
+- `alerts/example_close_position.json`
+- `alerts/example_technical_analysis.json`
+
 Alert types:
 - `buy_signal`: Execute a buy/long order
 - `sell_signal`: Execute a sell/short order
@@ -171,10 +182,36 @@ perplexitytrader/
 ├── Dockerfile           # Docker build configuration
 ├── docker-compose.yml   # Docker Compose configuration
 ├── mock_perplexity.py   # Mocked Perplexity client for testing
-└── core/                # Core components
-    ├── chart_analyzer.py   # Chart analysis logic
-    └── perplexity_client.py # Perplexity API client
+├── core/                # Core components
+│   ├── alert_processor.py  # Alert processing logic
+│   ├── bluefin_client.py   # Bluefin client interface
+│   ├── chart_analyzer.py   # Chart analysis logic
+│   ├── perplexity_client.py # Perplexity API client
+│   └── risk_manager.py     # Risk management logic
+├── api/                 # API components  
+│   └── server.py           # FastAPI server
+└── test/                # Unit and integration tests
+    ├── test_alert_processor.py
+    ├── test_bluefin_client.py
+    ├── test_chart_analyzer.py
+    └── test_risk_manager.py
 ```
+
+### Recommendations for Improvement
+
+1. **Code Organization**: Move more functionality to the `core/` directory for better separation of concerns.
+
+2. **Tests**: Add more comprehensive unit and integration tests for critical components in the `test/` directory.
+
+3. **Error Handling**: Further improve error handling, especially in API calls and chart analysis. Use consistent error response formats.
+
+4. **Logging**: Enhance logging with more structured formats and levels. Use appropriate log levels for different types of messages.
+
+5. **Rate Limiting**: Implement more sophisticated rate limiting for API calls to avoid hitting rate limits.
+
+6. **Documentation**: Add inline documentation to explain complex trading logic and algorithms.
+
+7. **Configuration Validation**: Add validation for configuration parameters to catch invalid settings early.
 
 ### Mock Trading Mode
 

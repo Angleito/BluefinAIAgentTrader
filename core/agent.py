@@ -71,14 +71,24 @@ from fastapi import FastAPI, Request
 import glob
 
 # Configure logging first
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler("logs/agent.log", mode='a', encoding='utf-8'),
-        logging.StreamHandler()
-    ]
-)
+def setup_logging():
+    """Set up logging configuration."""
+    log_format = json.dumps({
+        "timestamp": "%(asctime)s",
+        "level": "%(levelname)s",
+        "module": "%(module)s",
+        "message": "%(message)s"
+    })
+    
+    logging.basicConfig(
+        level=logging.INFO,
+        format=log_format,
+        handlers=[
+            logging.FileHandler(f"logs/trading_log_{int(datetime.now().timestamp())}.log"),
+            logging.StreamHandler()
+        ]
+    )
+
 logger = logging.getLogger("bluefin_agent")
 
 # Load environment variables from .env file
@@ -155,9 +165,6 @@ class BaseBluefinClient:
     async def close_position(self, position_id): pass
     async def get_account_equity(self): pass
     async def create_order(self, **kwargs): pass
-
-# Define BluefinClient as Any initially
-BluefinClient: Any = None
 
 # Initialize global variables
 claude_client = None
@@ -364,17 +371,6 @@ class MockOrderSignatureRequest:
 
 # Set OrderSignatureRequest to the mock class by default
 OrderSignatureRequest = MockOrderSignatureRequest
-
-def setup_logging():
-    """Set up logging configuration."""
-    logging.basicConfig(
-        level=logging.INFO,
-        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        handlers=[
-            logging.FileHandler(f"trading_log_{int(datetime.now().timestamp())}.log"),
-            logging.StreamHandler()
-        ]
-    )
 
 def initialize_risk_manager():
     """Initialize the risk management system."""
@@ -1039,7 +1035,23 @@ def parse_perplexity_analysis(analysis, ticker):
     return recommendation
 
 async def execute_trade(symbol: str, side: str, position_size: float):
-    """Execute a real trade on Bluefin exchange."""
+    """
+    Execute a real trade on the Bluefin exchange.
+    
+    This function places a market order on Bluefin based on the provided parameters:
+    - symbol: The trading pair to trade (e.g., "SUI/USD")
+    - side: The direction of the trade ("BUY" or "SELL")
+    - position_size: The size of the position to open, as a percentage of the account balance
+    
+    It first initializes the Bluefin client (if not already initialized) based on the available
+    client libraries and configuration. It then attempts to place the order using the appropriate
+    method for the client (create_order or place_order).
+    
+    If any errors occur during the process, it logs the error and creates a mock order response.
+    
+    Returns:
+        dict: The order response from Bluefin (real or mock)
+    """
     try:
         logger.info(f"Executing real trade: {side} {position_size} of {symbol}")
         
@@ -1129,7 +1141,20 @@ async def execute_trade(symbol: str, side: str, position_size: float):
         raise
 
 async def process_alerts():
-    """Process incoming alerts from the webhook server"""
+    """
+    Process incoming alerts from the webhook server.
+    
+    This function monitors the alerts directory for new JSON files containing trading signals.
+    When a new alert is detected, it extracts the relevant data and determines the appropriate
+    trading action based on the signal type and other parameters.
+    
+    For supported signal types (e.g., VuManChu Cipher B), it will execute a mock or real trade
+    on the Bluefin exchange depending on the MOCK_TRADING setting.
+    
+    Unsupported alert types are logged and skipped.
+    
+    The processed alert files are deleted to avoid double-processing.
+    """
     
     if not os.path.exists("alerts"):
         os.makedirs("alerts", exist_ok=True)

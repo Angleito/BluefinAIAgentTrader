@@ -5,6 +5,82 @@ This file contains all configurable parameters for the trading agent.
 """
 
 import os
+from typing import Dict, Any
+
+def validate_config(config: Dict[str, Any], section: str):
+    """
+    Validate a configuration dictionary.
+    
+    Args:
+        config: The configuration dictionary to validate
+        section: The name of the configuration section (for error messages)
+        
+    Raises:
+        ValueError: If any required keys are missing or have invalid values
+    """
+    required_keys = {
+        "TRADING_PARAMS": [
+            "chart_symbol",
+            "timeframe",
+            "candle_type",
+            "indicators",
+            "min_confidence",
+            "analysis_interval_seconds",
+            "max_position_size_usd",
+            "leverage",
+            "trading_symbol",
+            "stop_loss_percentage",
+            "take_profit_multiplier"
+        ],
+        "RISK_PARAMS": [
+            "max_risk_per_trade",
+            "max_open_positions",
+            "max_daily_loss",
+            "min_risk_reward_ratio"
+        ],
+        "AI_PARAMS": [
+            "use_perplexity",
+            "use_claude",
+            "perplexity_confidence_threshold",
+            "claude_confidence_threshold",
+            "confidence_concordance_required"
+        ]
+    }
+    
+    for key in required_keys[section]:
+        if key not in config:
+            raise ValueError(f"Missing required key '{key}' in {section} configuration")
+            
+    # Additional validation for specific keys
+    if section == "TRADING_PARAMS":
+        if config["min_confidence"] < 0 or config["min_confidence"] > 1:
+            raise ValueError(f"min_confidence must be between 0 and 1 (got {config['min_confidence']})")
+        
+        if config["leverage"] < 1:
+            raise ValueError(f"leverage must be greater than or equal to 1 (got {config['leverage']})")
+            
+        if config["stop_loss_percentage"] < 0 or config["stop_loss_percentage"] > 1:
+            raise ValueError(f"stop_loss_percentage must be between 0 and 1 (got {config['stop_loss_percentage']})")
+            
+    elif section == "RISK_PARAMS":
+        if config["max_risk_per_trade"] < 0 or config["max_risk_per_trade"] > 1:
+            raise ValueError(f"max_risk_per_trade must be between 0 and 1 (got {config['max_risk_per_trade']})")
+            
+        if config["max_open_positions"] < 1:
+            raise ValueError(f"max_open_positions must be greater than or equal to 1 (got {config['max_open_positions']})")
+            
+        if config["max_daily_loss"] < 0 or config["max_daily_loss"] > 1:
+            raise ValueError(f"max_daily_loss must be between 0 and 1 (got {config['max_daily_loss']})")
+            
+        if config["min_risk_reward_ratio"] < 1:
+            raise ValueError(f"min_risk_reward_ratio must be greater than or equal to 1 (got {config['min_risk_reward_ratio']})")
+            
+    elif section == "AI_PARAMS":
+        if config["perplexity_confidence_threshold"] < 0 or config["perplexity_confidence_threshold"] > 1:
+            raise ValueError(f"perplexity_confidence_threshold must be between 0 and 1 (got {config['perplexity_confidence_threshold']})")
+            
+        if config["claude_confidence_threshold"] < 0 or config["claude_confidence_threshold"] > 1:
+            raise ValueError(f"claude_confidence_threshold must be between 0 and 1 (got {config['claude_confidence_threshold']})")
 
 # Trading parameters
 TRADING_PARAMS = {
@@ -130,4 +206,9 @@ BLUEFIN_DEFAULTS = {
     "network": "MAINNET",              # Use "TESTNET" or "MAINNET"
     "leverage": 5,                     # Default leverage if not specified
     "default_symbol": "BTC-PERP",      # Default trading symbol
-} 
+}
+
+# Validate configurations
+validate_config(TRADING_PARAMS, "TRADING_PARAMS")
+validate_config(RISK_PARAMS, "RISK_PARAMS")
+validate_config(AI_PARAMS, "AI_PARAMS") 
