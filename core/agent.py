@@ -1260,12 +1260,77 @@ async def root():
     return {"status": "online", "message": "Trading Agent API is running"}
 
 @app.get("/status")
-async def status():
+async def get_status():
+    """Get the current status of the trading agent."""
+    # TODO: Return actual agent status
     return {
-        "status": "online",
-        "mock_trading": True,
-        "timestamp": get_timestamp()
+        "status": "running",
+        "last_analysis": get_timestamp(),
+        "open_positions": 2,
+        "recent_trades": 5
     }
+
+@app.get("/positions")
+async def get_positions():
+    """Get the list of open positions."""
+    # TODO: Return actual open positions
+    return [
+        {
+            "id": "pos_1",
+            "symbol": "BTC/USD",
+            "size": 0.5,
+            "entry_price": 45000,
+            "current_price": 47500,
+            "pnl": 1250
+        },
+        {
+            "id": "pos_2", 
+            "symbol": "ETH/USD",
+            "size": 2.0,
+            "entry_price": 3000,
+            "current_price": 2900,
+            "pnl": -200
+        }
+    ]
+
+@app.get("/trades")
+async def get_trades(limit: int = 10):
+    """Get the list of recent trades."""
+    # TODO: Return actual recent trades
+    return [
+        {
+            "id": "trade_1",
+            "symbol": "BTC/USD",
+            "side": "BUY",
+            "size": 0.5,
+            "price": 45000,
+            "timestamp": get_timestamp()
+        },
+        {
+            "id": "trade_2",
+            "symbol": "ETH/USD", 
+            "side": "SELL",
+            "size": 1.0,
+            "price": 3200,
+            "timestamp": get_timestamp()
+        }
+    ][:limit]
+
+@app.post("/open_trade")
+async def open_trade(trade: dict):
+    """Open a new trade."""
+    # TODO: Validate trade parameters
+    # TODO: Open actual trade
+    logger.info(f"Opening trade: {trade}")
+    return {"status": "success", "trade_id": f"trade_{get_timestamp()}"}
+
+@app.post("/close_trade")
+async def close_trade(trade_id: str):
+    """Close an open trade."""
+    # TODO: Validate trade ID
+    # TODO: Close actual trade
+    logger.info(f"Closing trade: {trade_id}")
+    return {"status": "success"}
 
 async def start_api_server():
     """Start the API server using uvicorn"""
