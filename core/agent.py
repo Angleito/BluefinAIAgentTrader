@@ -189,34 +189,30 @@ except ImportError:
 
 # Try to import SUI client first
 try:
-    # Ignore import errors here since these are optional dependencies
-    from bluefin_client_python_sui import Client as BluefinSUIClient  # type: ignore
-    from bluefin_client_python_sui import Networks as SUINetworks  # type: ignore
+    # Import according to official documentation
+    from bluefin_v2_client import BluefinClient as BluefinSUIClient, Networks
     BLUEFIN_CLIENT_SUI_AVAILABLE = True
     BluefinClient = BluefinSUIClient
-    Networks = SUINetworks
-    logger.info("Bluefin SUI client available")
+    logger.info("Bluefin v2 client available")
 except ImportError:
-    logger.warning("Bluefin SUI client not available, will try v2 client")
+    logger.warning("Bluefin v2 client not available, will try SUI client")
     BLUEFIN_CLIENT_SUI_AVAILABLE = False
     
-    # Try to import V2 client
+    # Try to import SUI client
     try:
-        # Ignore import errors here since these are optional dependencies
-        from bluefin_v2_client_python import Client as BluefinV2Client  # type: ignore
-        from bluefin_v2_client_python import Network as V2Networks  # type: ignore
+        # Import according to official documentation
+        from bluefin_client_sui import BluefinClient as BluefinSUIOldClient, Networks
         BLUEFIN_V2_CLIENT_AVAILABLE = True
-        BluefinClient = BluefinV2Client
-        Networks = V2Networks
-        logger.info("Bluefin v2 client available")
+        BluefinClient = BluefinSUIOldClient
+        logger.info("Bluefin SUI client available")
     except ImportError:
-        logger.warning("Bluefin v2 client not available")
+        logger.warning("Bluefin SUI client not available")
         BLUEFIN_V2_CLIENT_AVAILABLE = False
         logger.warning("Running in simulation mode without actual trading capabilities")
         print("WARNING: No Bluefin client libraries found. Using mock implementation.")
         print("Please install one of the following:")
-        print("   pip install git+https://github.com/fireflyprotocol/bluefin-client-python-sui.git")
         print("   pip install git+https://github.com/fireflyprotocol/bluefin-v2-client-python.git")
+        print("   pip install git+https://github.com/fireflyprotocol/bluefin-client-python-sui.git")
 
 # Warn if no Bluefin client libraries are available
 if not BLUEFIN_CLIENT_SUI_AVAILABLE and not BLUEFIN_V2_CLIENT_AVAILABLE:
@@ -228,6 +224,8 @@ class MockNetworks:
     """Mock networks for the MockBluefinClient"""
     MAINNET = "mainnet"
     TESTNET = "testnet"
+    SUI_STAGING = "sui_staging"
+    SUI_PROD = "sui_prod"
 
 # Set up Networks
 Networks = MockNetworks()
@@ -239,11 +237,31 @@ BluefinClient = None  # Will be set to either the real client or MockBluefinClie
 class MockBluefinClient:
     """Mock implementation of the Bluefin client for testing and development"""
     
-    def __init__(self, *args, **kwargs):
-        self.network = kwargs.get('network', 'testnet')
-        self.api_key = kwargs.get('api_key', 'mock_api_key')
-        self.private_key = kwargs.get('private_key', 'mock_private_key')
+    def __init__(self, are_terms_accepted=True, network=None, private_key=None, **kwargs):
+        self.network = network or MockNetworks.TESTNET
+        self.private_key = private_key or "mock_private_key"
+        self.are_terms_accepted = are_terms_accepted
         logger.info(f"Initialized MockBluefinClient on {self.network}")
+        
+    async def init(self, onboard_user=False):
+        """Mock implementation of init"""
+        logger.info(f"[MOCK] Initialized client with onboard_user={onboard_user}")
+        return True
+        
+    def get_public_address(self):
+        """Mock implementation of get_public_address"""
+        return "0xMOCK_ADDRESS_123456789"
+        
+    async def get_account_details(self):
+        """Mock implementation of get_account_details"""
+        return {
+            "address": "0xMOCK_ADDRESS_123456789",
+            "balance": 10000.0,
+            "margin_balance": 5000.0,
+            "positions": [],
+            "orders": [],
+            "account_type": "mock"
+        }
         
     async def close_position(self, position_id):
         """Mock implementation of close_position"""
@@ -520,44 +538,47 @@ def init_bluefin_client():
         Networks = MockNetworks
     
     try:
-        # First try SUI client
+        # First try v2 client
         if BLUEFIN_CLIENT_SUI_AVAILABLE and BluefinClient is not None:
+            # According to https://bluefin-exchange.readme.io/reference/initialization
             private_key = os.getenv("BLUEFIN_PRIVATE_KEY")
             network = os.getenv("BLUEFIN_NETWORK", "testnet").lower()
-            network_enum = Networks.MAINNET if network == "mainnet" else Networks.TESTNET
+            
+            # Map network string to enum
+            if network == "mainnet":
+                network_enum = Networks.MAINNET
+            elif network == "sui_staging":
+                network_enum = Networks.SUI_STAGING
+            elif network == "sui_prod":
+                network_enum = Networks.SUI_PROD
+            else:
+                network_enum = Networks.TESTNET
             
             if private_key:
                 try:
-                    client = BluefinClient(private_key=private_key, network=network_enum)
-                    logger.info(f"Initialized Bluefin SUI client on {network}")
+                    # Initialize client with required parameters
+                    client = BluefinClient(
+                        are_terms_accepted=True,
+                        network=network_enum,
+                        private_key=private_key
+                    )
+                    logger.info(f"Initialized Bluefin client on {network}")
+                    
+                    # Initialize the client asynchronously
+                    # This will be called in the main function
+                    logger.info("Client created, will be initialized in main function")
                 except Exception as e:
-                    logger.error(f"Failed to initialize SUI client: {e}")
+                    logger.error(f"Failed to initialize Bluefin client: {e}")
                     # Keep the default MockBluefinClient
             else:
                 logger.warning("Missing Bluefin private key, falling back to mock client")
                 # Keep the default MockBluefinClient
-        # Then try V2 client
-        elif BLUEFIN_V2_CLIENT_AVAILABLE and BluefinClient is not None:
-            api_key = os.getenv("BLUEFIN_API_KEY")
-            api_secret = os.getenv("BLUEFIN_API_SECRET")
-            
-            if api_key and api_secret:
-                try:
-                    client = BluefinClient(api_key=api_key, api_secret=api_secret)
-                    logger.info("Initialized Bluefin V2 client")
-                except Exception as e:
-                    logger.error(f"Failed to initialize V2 client: {e}")
-                    # Keep the default MockBluefinClient
-            else:
-                logger.warning("Missing Bluefin API credentials, falling back to mock client")
-                # Keep the default MockBluefinClient
-        # Fall back to mock client
         else:
             logger.warning("No Bluefin client available, using mock implementation")
             # Keep the default MockBluefinClient
     except Exception as e:
         logger.error(f"Error initializing Bluefin client: {e}")
-        logger.warning("Falling back to mock client due to initialization error")
+        logger.error(traceback.format_exc())
         # Keep the default MockBluefinClient
     
     return client
@@ -588,7 +609,7 @@ def init_claude_client():
         logger.error(f"Failed to initialize Claude client: {e}")
         return None
 
-def init_clients():
+async def init_clients():
     """Initialize API clients"""
     # Define a global client for the whole application
     global client, claude_client
@@ -596,6 +617,28 @@ def init_clients():
     # Initialize Bluefin client
     logger.info("Initializing Bluefin client")
     client = init_bluefin_client()
+    
+    # Initialize the Bluefin client if it's not a mock client
+    if not isinstance(client, MockBluefinClient) and not MOCK_TRADING:
+        try:
+            # According to https://bluefin-exchange.readme.io/reference/initialization
+            # The client needs to be initialized with await client.init()
+            logger.info("Initializing real Bluefin client connection...")
+            await client.init(onboard_user=True)
+            logger.info("Bluefin client initialized successfully")
+            
+            # Get and log the public address
+            public_address = client.get_public_address()
+            logger.info(f"Connected with wallet address: {public_address}")
+            
+            # Get account details
+            account_details = await client.get_account_details()
+            logger.info(f"Account details: {account_details}")
+        except Exception as e:
+            logger.error(f"Error initializing Bluefin client: {e}")
+            logger.error(traceback.format_exc())
+            logger.warning("Falling back to mock client")
+            client = MockBluefinClient()
     
     # Initialize Claude client 
     logger.info("Initializing Claude client")
@@ -1246,7 +1289,7 @@ async def main():
     os.makedirs("logs", exist_ok=True)
     
     # Initialize clients
-    init_clients()
+    await init_clients()
     
     # Start API server in the background
     api_task = asyncio.create_task(start_api_server())

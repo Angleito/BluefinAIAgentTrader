@@ -1,6 +1,7 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """
-Test script to verify Bluefin SDK integration and show available methods.
+Test script to verify Bluefin client integration.
+Based on the official documentation: https://bluefin-exchange.readme.io/reference/initialization
 """
 
 import os
@@ -22,132 +23,107 @@ logger = logging.getLogger("bluefin_test")
 # Load environment variables
 load_dotenv()
 
-# Test SUI Client
-def test_sui_client():
+async def test_bluefin_v2_client():
+    """Test the Bluefin v2 client integration"""
     try:
-        from bluefin_client_sui import (
-            BluefinClient,
-            Networks,
-            ORDER_SIDE,
-            ORDER_TYPE
-        )
+        from bluefin_v2_client import BluefinClient, Networks
+        logger.info("✅ Successfully imported Bluefin v2 client")
         
-        logger.info("Successfully imported Bluefin SUI client")
-        logger.info(f"Available networks: {dir(Networks)}")
-        logger.info(f"Order side options: {dir(ORDER_SIDE)}")
-        logger.info(f"Order type options: {dir(ORDER_TYPE)}")
-        
-        # Initialize client
+        # Get environment variables
         private_key = os.getenv("BLUEFIN_PRIVATE_KEY")
-        if not private_key:
-            logger.error("BLUEFIN_PRIVATE_KEY not found in environment variables")
-            return False, None, None, None
-            
-        logger.info(f"Initializing Bluefin SUI client with private key: {private_key[:10]}...")
-        client = BluefinClient(private_key=private_key, network=Networks.MAINNET)
-        logger.info("Bluefin SUI client initialized successfully")
+        network_str = os.getenv("BLUEFIN_NETWORK", "testnet").lower()
         
-        # Show available methods
-        logger.info("Available client methods:")
-        for method_name in dir(client):
-            if not method_name.startswith('_'):  # Skip private methods
-                logger.info(f"  - {method_name}")
-                
-        return True, client, ORDER_SIDE, ORDER_TYPE
-    except ImportError as e:
-        logger.error(f"Error importing Bluefin SUI client: {e}")
-        return False, None, None, None
-    except Exception as e:
-        logger.error(f"Error initializing Bluefin SUI client: {e}")
-        return False, None, None, None
-
-# Test V2 Client
-def test_v2_client():
-    try:
-        from bluefin.v2.client import BluefinClient
-        from bluefin.v2.types import OrderSignatureRequest
-        
-        logger.info("Successfully imported Bluefin V2 client")
-        
-        # Initialize client
-        api_key = os.getenv("BLUEFIN_API_KEY")
-        api_secret = os.getenv("BLUEFIN_API_SECRET")
-        if not api_key or not api_secret:
-            logger.error("BLUEFIN_API_KEY or BLUEFIN_API_SECRET not found in environment variables")
-            return False, None
-            
-        logger.info(f"Initializing Bluefin V2 client with API key: {api_key[:10]}...")
-        client = BluefinClient(api_key=api_key, api_secret=api_secret)
-        logger.info("Bluefin V2 client initialized successfully")
-        
-        # Show available methods
-        logger.info("Available client methods:")
-        for method_name in dir(client):
-            if not method_name.startswith('_'):  # Skip private methods
-                logger.info(f"  - {method_name}")
-                
-        return True, client
-    except ImportError as e:
-        logger.error(f"Error importing Bluefin V2 client: {e}")
-        return False, None
-    except Exception as e:
-        logger.error(f"Error initializing Bluefin V2 client: {e}")
-        return False, None
-
-# Test getting account information
-async def test_account_info(client):
-    try:
-        logger.info("Testing get_account_info...")
-        
-        # Method depends on client type
-        if hasattr(client, 'get_user_account_data'):
-            # bluefin_client_sui approach
-            account_data = await client.get_user_account_data()
-            margin_data = await client.get_user_margin()
-            positions = await client.get_user_positions() or []
-            
-            account_info = {
-                "balance": float(account_data.get("totalCollateralValue", 0)),
-                "availableMargin": float(margin_data.get("availableMargin", 0)),
-                "positions": positions
-            }
+        # Map network string to enum
+        if network_str == "mainnet":
+            network = Networks.MAINNET
+        elif network_str == "sui_staging":
+            network = Networks.SUI_STAGING
+        elif network_str == "sui_prod":
+            network = Networks.SUI_PROD
         else:
-            # Fallback for other client implementations
-            account_info = await client.get_account_info()
-            
-        logger.info(f"Account info retrieved: balance={account_info['balance']}, "
-                   f"margin={account_info['availableMargin']}, "
-                   f"positions={len(account_info['positions'])}")
+            network = Networks.TESTNET
         
-        return account_info
+        if not private_key:
+            logger.error("❌ Missing BLUEFIN_PRIVATE_KEY environment variable")
+            return False
+        
+        # Initialize client according to documentation
+        client = BluefinClient(
+            are_terms_accepted=True,
+            network=network,
+            private_key=private_key
+        )
+        logger.info(f"✅ Successfully created Bluefin client for network: {network_str}")
+        
+        # Initialize the client
+        await client.init(onboard_user=True)
+        logger.info("✅ Successfully initialized Bluefin client")
+        
+        # Get public address
+        public_address = client.get_public_address()
+        logger.info(f"✅ Connected with wallet address: {public_address}")
+        
+        # Get account details
+        account_details = await client.get_account_details()
+        logger.info(f"✅ Account details: {account_details}")
+        
+        return True
+    except ImportError as e:
+        logger.error(f"❌ Failed to import Bluefin v2 client: {e}")
+        return False
     except Exception as e:
-        logger.error(f"Failed to retrieve account info: {e}")
-        return None
+        logger.error(f"❌ Error testing Bluefin v2 client: {e}")
+        return False
+
+async def test_bluefin_sui_client():
+    """Test the Bluefin SUI client integration"""
+    try:
+        from bluefin_client_sui import BluefinClient, Networks
+        logger.info("✅ Successfully imported Bluefin SUI client")
+        
+        # Get environment variables
+        private_key = os.getenv("BLUEFIN_PRIVATE_KEY")
+        network_str = os.getenv("BLUEFIN_NETWORK", "testnet").lower()
+        
+        # Map network string to enum
+        network = Networks.MAINNET if network_str == "mainnet" else Networks.TESTNET
+        
+        if not private_key:
+            logger.error("❌ Missing BLUEFIN_PRIVATE_KEY environment variable")
+            return False
+        
+        # Initialize client according to documentation
+        client = BluefinClient(private_key=private_key, network=network)
+        logger.info(f"✅ Successfully created Bluefin SUI client for network: {network_str}")
+        
+        # Get public address
+        public_address = client.get_public_address()
+        logger.info(f"✅ Connected with wallet address: {public_address}")
+        
+        return True
+    except ImportError as e:
+        logger.error(f"❌ Failed to import Bluefin SUI client: {e}")
+        return False
+    except Exception as e:
+        logger.error(f"❌ Error testing Bluefin SUI client: {e}")
+        return False
 
 async def main():
-    logger.info("Testing Bluefin SDK integration")
+    """Main function to run the tests"""
+    logger.info("Starting Bluefin integration tests...")
     
-    # Test SUI client
-    sui_success, sui_client, ORDER_SIDE, ORDER_TYPE = test_sui_client()
+    # Test Bluefin v2 client
+    v2_success = await test_bluefin_v2_client()
     
-    # If SUI client failed, try V2 client
-    if not sui_success:
-        logger.info("Trying Bluefin V2 client...")
-        v2_success, v2_client = test_v2_client()
-        if v2_success:
-            client = v2_client
-        else:
-            logger.error("Both Bluefin clients failed to initialize")
-            return
+    # Test Bluefin SUI client
+    sui_success = await test_bluefin_sui_client()
+    
+    if v2_success or sui_success:
+        logger.info("✅ At least one Bluefin client is working correctly")
+        return 0
     else:
-        client = sui_client
-    
-    # Test getting account info
-    account_info = await test_account_info(client)
-    if account_info:
-        logger.info("Account info test passed")
-    else:
-        logger.error("Account info test failed")
+        logger.error("❌ All Bluefin client tests failed")
+        return 1
 
 if __name__ == "__main__":
-    asyncio.run(main()) 
+    sys.exit(asyncio.run(main())) 

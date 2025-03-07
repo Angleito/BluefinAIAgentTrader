@@ -21,9 +21,10 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Install Bluefin client libraries directly (combine into one RUN to reduce layers)
+# Using the official repositories as per https://bluefin-exchange.readme.io/reference/initialization
 RUN pip install --no-cache-dir \
-    git+https://github.com/fireflyprotocol/bluefin-client-python-sui.git \
     git+https://github.com/fireflyprotocol/bluefin-v2-client-python.git \
+    git+https://github.com/fireflyprotocol/bluefin-client-python-sui.git \
     && pip install playwright \
     && playwright install --with-deps chromium
 
