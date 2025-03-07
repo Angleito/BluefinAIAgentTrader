@@ -1,7 +1,56 @@
-# Byte-compiled / optimized / DLL files
+# Environment files
+.env
+.envprod
+run_trader_env.sh
+
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+ENV/
+bluefin_env/
+
+# Logs
+logs/
+*.log
+
+# Screenshots and analysis
+screenshots/
+analysis/
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Byte-compiled / optimized / DLL files
+*.manifest
+*.spec
 
 # C extensions
 *.so
@@ -127,15 +176,6 @@ celerybeat.pid
 # SageMath parsed files
 *.sage.py
 
-# Environments
-.env
-.venv
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
-
 # Spyder project settings
 .spyderproject
 .spyproject
@@ -171,5 +211,4 @@ cython_debug/
 .pypirc
 
 /browser-use
-node_modules
-.env 
+node_modules 
