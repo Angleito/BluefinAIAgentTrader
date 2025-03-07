@@ -17,9 +17,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy only the requirements file first to leverage Docker cache
 COPY requirements.txt .
 
-# Install Python dependencies with explicit Flask installation
+# Install dependencies in a specific order to avoid conflicts
 RUN pip install --no-cache-dir flask==2.0.1 && \
-    pip install --no-cache-dir -r requirements.txt
+    pip install --no-cache-dir greenlet==3.0.0 && \
+    pip install --no-cache-dir playwright==1.39.0 && \
+    pip install --no-cache-dir -r requirements.txt && \
+    pip install --no-cache-dir git+https://github.com/fireflyprotocol/bluefin-v2-client-python.git
 
 # Install playwright browsers
 RUN playwright install --with-deps chromium

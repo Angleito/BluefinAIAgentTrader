@@ -95,6 +95,13 @@ else
     print_info "Agent API is accessible through nginx."
 fi
 
+# Check Bluefin API connection
+if ! curl -s https://api.bluefin.exchange/v1/exchangeInfo > /dev/null; then  
+    print_warning "Bluefin API is not accessible. Please check the Bluefin API URL and credentials."
+else
+    print_info "Bluefin API is accessible."  
+fi
+
 print_info "✅ Frontend connection verification completed."
 print_info "If all checks passed, your frontend is properly connected to the backend in the production Docker setup."
 print_info "If any warnings or errors were reported, please check the corresponding service logs:"

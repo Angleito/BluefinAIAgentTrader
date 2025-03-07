@@ -5,6 +5,9 @@ const API_BASE_URL = '/api';
 const SOCKET_URL = window.location.origin; // This will work with the socket.io path configured in nginx
 let socket: Socket | null = null;
 
+// Bluefin API base URL
+const BLUEFIN_API_URL = 'https://api.bluefin.exchange/v1';
+
 // WebSocket functions
 export function connectSocket(onConnect?: () => void, onDisconnect?: () => void) {
   if (socket) {
@@ -174,4 +177,29 @@ export async function controlAgent(command: string) {
     body: JSON.stringify({ command })
   });
   return await response.json();
-} 
+}
+
+// Bluefin API endpoints
+export async function getBluefinExchangeInfo() {
+  const response = await fetch(`${BLUEFIN_API_URL}/exchangeInfo`);
+  return await response.json();
+}
+
+export async function getBluefinMarketData(symbol: string) {  
+  const response = await fetch(`${BLUEFIN_API_URL}/marketData?symbol=${symbol}`);
+  return await response.json();
+}
+
+export async function postBluefinOrder(order: any) {
+  const response = await fetch(`${BLUEFIN_API_URL}/orders`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json', 
+      ...authHeader()
+    },
+    body: JSON.stringify(order)
+  });
+  return await response.json();  
+}
+
+// Add more Bluefin API functions as needed 
