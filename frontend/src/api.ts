@@ -1,7 +1,8 @@
 import { io, Socket } from 'socket.io-client';
 
-const API_BASE_URL = 'http://localhost:5000';
-const SOCKET_URL = 'http://localhost:5001';
+// Use relative URLs to work with nginx proxy in production
+const API_BASE_URL = '/api';
+const SOCKET_URL = window.location.origin; // This will work with the socket.io path configured in nginx
 let socket: Socket | null = null;
 
 // WebSocket functions
@@ -11,7 +12,10 @@ export function connectSocket(onConnect?: () => void, onDisconnect?: () => void)
     return socket;
   }
 
-  socket = io(SOCKET_URL);
+  // Connect to socket.io through the /socket.io path configured in nginx
+  socket = io(SOCKET_URL, {
+    path: '/socket.io'
+  });
   
   socket.on('connect', () => {
     console.log('Connected to WebSocket server');
@@ -143,6 +147,31 @@ export async function updateConfiguration(config: any) {
       ...authHeader()
     },
     body: JSON.stringify(config)
+  });
+  return await response.json();
+}
+
+// Agent API endpoints
+const AGENT_API_URL = '/agent';
+
+export async function getAgentHealth() {
+  const response = await fetch(`${AGENT_API_URL}/health`);
+  return await response.json();
+}
+
+export async function getAgentMetrics() {
+  const response = await fetch(`${AGENT_API_URL}/metrics`);
+  return await response.json();
+}
+
+export async function controlAgent(command: string) {
+  const response = await fetch(`${AGENT_API_URL}/control`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...authHeader()
+    },
+    body: JSON.stringify({ command })
   });
   return await response.json();
 } 

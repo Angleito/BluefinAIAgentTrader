@@ -106,12 +106,29 @@ mkdir -p logs config data alerts
 # Build frontend for production
 print_info "Building frontend for production..."
 cd frontend
-npm install
+
+# Check if node_modules exists, if not install dependencies
+if [ ! -d "node_modules" ]; then
+    print_info "Installing frontend dependencies..."
+    npm install
+fi
+
+# Build the frontend
+print_info "Building frontend application..."
 npm run build
+
 if [ $? -ne 0 ]; then
     print_error "Frontend build failed."
     exit 1
 fi
+
+# Verify build directory exists and contains index.html
+if [ ! -d "build" ] || [ ! -f "build/index.html" ]; then
+    print_error "Frontend build directory is missing or incomplete."
+    exit 1
+fi
+
+print_info "Frontend build successful."
 cd ..
 
 # Check if ports are already in use

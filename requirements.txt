@@ -11,7 +11,7 @@ backoff==2.2.1
 python-dotenv==0.19.2
 
 # Dependency resolution
-greenlet==3.0.3
+greenlet==3.0.0
 
 # Browser automation
 playwright==1.39.0
