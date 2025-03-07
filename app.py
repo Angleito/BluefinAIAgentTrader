@@ -1,11 +1,15 @@
 from flask import Flask, jsonify, request, render_template
 import os
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
 from anthropic import Client
 import subprocess
 import threading
+from core.config import TRADING_PARAMS, RISK_PARAMS, AI_PARAMS
+import jwt
+from functools import wraps
+from flask_socketio import SocketIO
 
 # Setup logging
 logging.basicConfig(
@@ -20,6 +24,9 @@ logger = logging.getLogger("webhook_server")
 
 # Initialize Flask app
 app = Flask(__name__)
+
+# Initialize Flask-SocketIO
+socketio = SocketIO(app, cors_allowed_origins="*")
 
 # Initialize Claude client
 claude_client = None
@@ -50,6 +57,45 @@ trading_state = {
     "open_positions": [],
     "last_analysis": None
 }
+
+# JWT Configuration
+JWT_SECRET = os.environ.get('JWT_SECRET', 'dev-secret-key')
+JWT_ALGORITHM = 'HS256'
+JWT_EXPIRATION_DELTA = timedelta(days=1)
+
+def generate_token(user_id):
+    """Generate a new JWT token for the given user_id"""
+    payload = {
+        'user_id': user_id,
+        'exp': datetime.utcnow() + JWT_EXPIRATION_DELTA
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+def token_required(f):
+    """Decorator to protect routes with JWT authentication"""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        token = None
+        auth_header = request.headers.get('Authorization')
+        
+        if auth_header and auth_header.startswith('Bearer '):
+            token = auth_header.split(' ')[1]
+            
+        if not token:
+            return jsonify({'status': 'error', 'message': 'Authentication token is missing'}), 401
+            
+        try:
+            payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+            # Store user_id in g instead of request
+            from flask import g
+            g.user_id = payload['user_id']
+        except jwt.ExpiredSignatureError:
+            return jsonify({'status': 'error', 'message': 'Authentication token has expired'}), 401
+        except jwt.InvalidTokenError:
+            return jsonify({'status': 'error', 'message': 'Invalid authentication token'}), 401
+            
+        return f(*args, **kwargs)
+    return decorated
 
 @app.route('/')
 def index():
@@ -104,6 +150,7 @@ def stop_trading():
     return jsonify({"status": "success", "message": "Trading bot stopped"})
 
 @app.route('/configure', methods=['POST'])
+@token_required
 def configure():
     """Configure trading parameters"""
     try:
@@ -115,9 +162,19 @@ def configure():
             if param not in new_params:
                 return jsonify({"status": "error", "message": f"Missing required parameter: {param}"}), 400
         
-        # Update trading parameters
+        # Update in-memory trading parameters
         trading_state["current_parameters"] = new_params
         logger.info(f"Updated trading parameters: {new_params}")
+        
+        # Save updated parameters to config file
+        config_dir = "config"
+        os.makedirs(config_dir, exist_ok=True)
+        with open(os.path.join(config_dir, "config.json"), "w") as f:
+            json.dump({
+                "TRADING_PARAMS": new_params,
+                "RISK_PARAMS": RISK_PARAMS,
+                "AI_PARAMS": AI_PARAMS
+            }, f, indent=2)
         
         return jsonify({"status": "success", "message": "Trading parameters updated", "parameters": new_params})
     except Exception as e:
@@ -381,12 +438,78 @@ def test_claude():
             "message": str(e)
         }), 500
 
+@app.route('/login', methods=['POST'])
+def login():
+    """Authenticate user and return JWT token"""
+    try:
+        data = request.json
+        
+        if not data or not data.get('username') or not data.get('password'):
+            return jsonify({'status': 'error', 'message': 'Username and password are required'}), 400
+            
+        # For demo purposes, hardcoded credentials
+        # In production, you would validate against a database
+        if data.get('username') == 'admin' and data.get('password') == 'password':
+            token = generate_token('admin')
+            return jsonify({
+                'status': 'success',
+                'token': token,
+                'user': {
+                    'id': 'admin',
+                    'username': 'admin'
+                }
+            })
+        else:
+            return jsonify({'status': 'error', 'message': 'Invalid credentials'}), 401
+    except Exception as e:
+        logger.error(f"Error during login: {e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/configuration', methods=['GET'])
+def get_configuration():
+    """Get current configuration"""
+    try:
+        # Load configuration from file if it exists
+        config_dir = "config"
+        config_file = os.path.join(config_dir, "config.json")
+        
+        if os.path.exists(config_file):
+            with open(config_file, "r") as f:
+                config = json.load(f)
+        else:
+            # Return default configuration from core.config
+            config = {
+                "TRADING_PARAMS": TRADING_PARAMS,
+                "RISK_PARAMS": RISK_PARAMS,
+                "AI_PARAMS": AI_PARAMS
+            }
+            
+        return jsonify(config)
+    except Exception as e:
+        logger.error(f"Error getting configuration: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+# WebSocket event handlers
+@socketio.on('connect')
+def handle_connect():
+    """Handle client connection"""
+    logger.info(f"Client connected: {request.sid}")
+
+@socketio.on('disconnect')
+def handle_disconnect():
+    """Handle client disconnection"""
+    logger.info(f"Client disconnected: {request.sid}")
+
+# Function to emit updates to connected clients
+def emit_update(event_type, data):
+    """Emit an update to all connected clients"""
+    socketio.emit(event_type, data)
+
+# Update the run code to use socketio instead of app.run
 if __name__ == '__main__':
     # Create necessary directories
     os.makedirs("logs", exist_ok=True)
-    os.makedirs("screenshots", exist_ok=True)
-    os.makedirs("analysis", exist_ok=True)
+    os.makedirs("data", exist_ok=True)
     
-    # Start the Flask app
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=True) 
+    # Start the Flask-SocketIO server
+    socketio.run(app, host='0.0.0.0', port=5000, debug=True) 

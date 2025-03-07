@@ -2,15 +2,19 @@ import asyncio
 import logging
 import logging.config
 import os
+import json
 from fastapi import FastAPI
 from bluefin_client_sui import BluefinClient, Networks
-from config import (
+from core.config import (
     BLUEFIN_CONFIG, 
     LOGGING_CONFIG, 
     TRADINGVIEW_WEBHOOK_CONFIG, 
     TRADING_PARAMS,
     PERFORMANCE_TRACKING_CONFIG,
-    RISK_MANAGEMENT_CONFIG
+    RISK_MANAGEMENT_CONFIG,
+    RISK_PARAMS,
+    AI_PARAMS,
+    validate_config
 )
 from api.webhook_handler import router as webhook_router
 from core.performance_tracker import performance_tracker
@@ -58,6 +62,21 @@ async def startup_event():
     global visualizer
     visualizer = visualizer
     logger.info("Visualizer initialized.")
+
+    # Load saved configuration if available
+    config_dir = "config"
+    config_file = os.path.join(config_dir, "config.json")
+    if os.path.exists(config_file):
+        with open(config_file, "r") as f:
+            saved_config = json.load(f)
+            TRADING_PARAMS.update(saved_config.get("TRADING_PARAMS", {}))
+            RISK_PARAMS.update(saved_config.get("RISK_PARAMS", {}))
+            AI_PARAMS.update(saved_config.get("AI_PARAMS", {}))
+
+    # Validate loaded configuration 
+    validate_config(TRADING_PARAMS, "TRADING_PARAMS")  
+    validate_config(RISK_PARAMS, "RISK_PARAMS")
+    validate_config(AI_PARAMS, "AI_PARAMS")
 
 @app.on_event("shutdown")
 async def shutdown_event():

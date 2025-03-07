@@ -1,26 +1,135 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
+import { getConfiguration, updateConfiguration } from '../api';
+
+interface ConfigType {
+  TRADING_PARAMS: {
+    symbol?: string;
+    timeframe?: string;
+    leverage?: number;
+    // Other TRADING_PARAMS fields...
+  };
+  RISK_PARAMS: {
+    max_risk_per_trade?: number;
+    // Other RISK_PARAMS fields...
+  };
+  AI_PARAMS: {
+    use_perplexity?: boolean;
+    // Other AI_PARAMS fields...
+  };
+}
 
 const Configuration: React.FC = () => {
+  const [config, setConfig] = useState<ConfigType>({
+    TRADING_PARAMS: {},
+    RISK_PARAMS: {},
+    AI_PARAMS: {}
+  });
+
+  useEffect(() => {
+    // Fetch current configuration on component mount
+    getConfiguration().then((data: ConfigType) => setConfig(data));
+  }, []);
+
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const result = await updateConfiguration(config);
+    alert(result.message);
+    // Refetch configuration after successful update
+    getConfiguration().then((data: ConfigType) => setConfig(data));
+  };
+
   return (
     <div>
       <h1>Agent Configuration</h1>
-      
-      <section>
-        <h2>Trading Parameters</h2>
-        {/* TODO: Form for modifying trading parameters */}
-      </section>
+      <form onSubmit={handleSubmit}>
+        <section>
+          <h2>Trading Parameters</h2>
+          <label>
+            Symbol:
+            <input 
+              type="text"
+              value={config.TRADING_PARAMS.symbol || ''}
+              onChange={e => setConfig({
+                ...config,
+                TRADING_PARAMS: {
+                  ...config.TRADING_PARAMS, 
+                  symbol: e.target.value
+                }
+              })}
+            />
+          </label>
+          <label>
+            Timeframe:
+            <input
+              type="text" 
+              value={config.TRADING_PARAMS.timeframe || ''}
+              onChange={e => setConfig({
+                ...config,
+                TRADING_PARAMS: {
+                  ...config.TRADING_PARAMS,
+                  timeframe: e.target.value
+                }
+              })}
+            />
+          </label>
+          <label>
+            Leverage:
+            <input
+              type="number"
+              value={config.TRADING_PARAMS.leverage || 0}
+              onChange={e => setConfig({
+                ...config,
+                TRADING_PARAMS: {
+                  ...config.TRADING_PARAMS,
+                  leverage: parseInt(e.target.value)
+                }
+              })}
+            />
+          </label>
+          {/* Other TRADING_PARAMS fields... */}
+        </section>
 
-      <section>  
-        <h2>Risk Parameters</h2>
-        {/* TODO: Form for modifying risk parameters */}
-      </section>
+        <section>
+          <h2>Risk Parameters</h2>
+          <label>
+            Max Risk Per Trade:
+            <input
+              type="number"
+              step="0.01"
+              value={config.RISK_PARAMS.max_risk_per_trade || 0}
+              onChange={e => setConfig({
+                ...config,
+                RISK_PARAMS: {
+                  ...config.RISK_PARAMS,
+                  max_risk_per_trade: parseFloat(e.target.value)
+                }
+              })}
+            />
+          </label>
+          {/* Other RISK_PARAMS fields... */}
+        </section>
+        
+        <section>
+          <h2>AI Parameters</h2>
+          <label>
+            Use Perplexity:
+            <input
+              type="checkbox"
+              checked={config.AI_PARAMS.use_perplexity || false}
+              onChange={e => setConfig({
+                ...config,
+                AI_PARAMS: {
+                  ...config.AI_PARAMS,
+                  use_perplexity: e.target.checked
+                }
+              })}
+            />
+          </label>
+          {/* Other AI_PARAMS fields... */}  
+        </section>
 
-      <section>
-        <h2>AI Parameters</h2>  
-        {/* TODO: Form for modifying AI parameters */}
-      </section>
-
-      <button>Save Changes</button>
+        <button type="submit">Save Changes</button>
+      </form>
     </div>
   );
 };
