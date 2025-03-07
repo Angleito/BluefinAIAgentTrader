@@ -29,6 +29,7 @@ import asyncio
 from typing import Dict, List, Optional, Union, Any
 from bluefin_client_sui import BluefinClient as SuiClient, Networks, SOCKET_EVENTS
 from bluefin.v2.client import BluefinClient as ApiClient
+from core.agent import Order
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +43,22 @@ class ORDER_TYPE:
     LIMIT = "LIMIT"
     STOP_MARKET = "STOP_MARKET"
     TAKE_PROFIT = "TAKE_PROFIT"
+
+# Define missing socket event constants if not available in the library
+if not hasattr(SOCKET_EVENTS, 'ORDER_SETTLEMENT_UPDATE'):
+    SOCKET_EVENTS.ORDER_SETTLEMENT_UPDATE = type('obj', (object,), {
+        'value': 'orderSettlementUpdate'
+    })
+
+if not hasattr(SOCKET_EVENTS, 'ORDER_REQUEUE_UPDATE'):
+    SOCKET_EVENTS.ORDER_REQUEUE_UPDATE = type('obj', (object,), {
+        'value': 'orderRequeueUpdate'
+    })
+
+if not hasattr(SOCKET_EVENTS, 'ORDER_CANCELLED_ON_REVERSION_UPDATE'):
+    SOCKET_EVENTS.ORDER_CANCELLED_ON_REVERSION_UPDATE = type('obj', (object,), {
+        'value': 'orderCancelledOnReversionUpdate'
+    })
 
 # Constants
 REQUEUE_ADJUSTMENT_THRESHOLD = 2  # Adjust price after this many requeues

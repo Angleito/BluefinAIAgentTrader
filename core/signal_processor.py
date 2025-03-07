@@ -231,4 +231,51 @@ async def can_open_new_position(client) -> bool:
         return True
     except Exception as e:
         logger.error(f"Error checking if new position can be opened: {str(e)}")
-        return False 
+        return False
+
+def process_signal(signal_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """
+    Process a signal from the webhook API.
+    
+    Args:
+        signal_data: The signal data from the webhook
+        
+    Returns:
+        Optional[Dict[str, Any]]: Processed signal ready for trade execution, or None if invalid
+    """
+    logger.info(f"Processing signal: {signal_data}")
+    
+    # Validate required fields
+    required_fields = ["symbol", "timeframe", "type"]
+    for field in required_fields:
+        if field not in signal_data:
+            logger.warning(f"Missing required field: {field}")
+            return None
+    
+    # Map the symbol to Bluefin format if needed
+    if "/" in signal_data["symbol"] or ":" in signal_data["symbol"]:
+        bluefin_symbol = map_tradingview_to_bluefin_symbol(signal_data["symbol"])
+    else:
+        bluefin_symbol = signal_data["symbol"]
+    
+    # Ensure the symbol is supported
+    if "trading_pairs" in TRADING_PARAMS and bluefin_symbol not in TRADING_PARAMS["trading_pairs"]:
+        logger.warning(f"Unsupported trading pair: {bluefin_symbol}")
+        return None
+    
+    # Create the processed signal
+    processed_signal = {
+        "symbol": bluefin_symbol,
+        "type": signal_data["type"].lower(),  # Normalize to lowercase
+        "timeframe": signal_data["timeframe"],
+        "entry_time": datetime.utcnow().isoformat(),
+        "position_size": calculate_position_size(),
+        "leverage": TRADING_PARAMS.get("leverage", int(os.getenv("DEFAULT_LEVERAGE", 5))),
+        "stop_loss": calculate_stop_loss(signal_data["type"].lower()),
+        "take_profit": calculate_take_profit(signal_data["type"].lower()),
+        "confidence": signal_data.get("confidence", 0.5),
+        "original_signal": signal_data,
+    }
+    
+    logger.info(f"Processed signal: {processed_signal}")
+    return processed_signal 
