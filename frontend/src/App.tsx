@@ -5,6 +5,7 @@ import Dashboard from './pages/Dashboard';
 import Configuration from './pages/Configuration';
 import TradingActions from './pages/TradingActions';
 import Login from './pages/Login';
+import AIChat from './pages/AIChat';
 import { isAuthenticated } from './api';
 
 // Protected route component
@@ -27,6 +28,7 @@ const App: React.FC = () => {
                 <li><Link to="/dashboard">Dashboard</Link></li>
                 <li><Link to="/configuration">Configuration</Link></li>
                 <li><Link to="/trading">Trading Actions</Link></li>
+                <li><Link to="/ai-chat">AI Chat</Link></li>
                 <li><button onClick={() => {
                   localStorage.removeItem('token');
                   localStorage.removeItem('user');
@@ -55,7 +57,12 @@ const App: React.FC = () => {
                 <TradingActions />
               </ProtectedRoute>
             } />
-            <Route path="/" element={<Navigate to="/dashboard" replace />} />
+            <Route path="/ai-chat" element={
+              <ProtectedRoute>
+                <AIChat />
+              </ProtectedRoute>  
+            } />
+            <Route path="*" element={<Navigate to="/dashboard" replace />} />
           </Routes>
         </main>
       </div>
