@@ -1,15 +1,18 @@
-from flask import Flask, jsonify, request, render_template
 import os
-import logging
-from datetime import datetime, timedelta
 import json
-from anthropic import Client
+import logging
+import time
 import subprocess
 import threading
 from core.config import TRADING_PARAMS, RISK_PARAMS, AI_PARAMS
 import jwt
+from datetime import datetime, timedelta
 from functools import wraps
+from flask import Flask, request, jsonify, g, render_template
 from flask_socketio import SocketIO, request as socketio_request
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
+from anthropic import Client
 
 # Setup logging
 logging.basicConfig(
@@ -58,8 +61,19 @@ trading_state = {
     "last_analysis": None
 }
 
+# Initialize rate limiter
+limiter = Limiter(
+    get_remote_address,
+    app=app,
+    default_limits=["200 per day", "50 per hour"],
+    storage_uri="memory://",
+    strategy="fixed-window"
+)
+
 # JWT Configuration
 JWT_SECRET = os.environ.get('JWT_SECRET', 'dev-secret-key')
+if JWT_SECRET == 'dev-secret-key' and os.environ.get('FLASK_ENV') == 'production':
+    logger.warning("WARNING: Using default JWT secret in production environment!")
 JWT_ALGORITHM = 'HS256'
 JWT_EXPIRATION_DELTA = timedelta(days=1)
 
@@ -87,7 +101,6 @@ def token_required(f):
         try:
             payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
             # Store user_id in g instead of request
-            from flask import g
             g.user_id = payload['user_id']
         except jwt.ExpiredSignatureError:
             return jsonify({'status': 'error', 'message': 'Authentication token has expired'}), 401
@@ -432,31 +445,43 @@ def test_claude():
         }), 500
 
 @app.route('/login', methods=['POST'])
+@limiter.limit("5 per minute")
 def login():
     """Authenticate user and return JWT token"""
     try:
         data = request.json
         
         if not data or not data.get('username') or not data.get('password'):
+            logger.warning(f"Login attempt with missing credentials from {get_remote_address()}")
             return jsonify({'status': 'error', 'message': 'Username and password are required'}), 400
+        
+        # Get admin credentials from environment variables with fallbacks
+        admin_username = os.environ.get('ADMIN_USERNAME', 'admin')
+        admin_password = os.environ.get('ADMIN_PASSWORD', 'password')
+        
+        # In production, warn if using default credentials
+        if os.environ.get('FLASK_ENV') == 'production' and admin_username == 'admin' and admin_password == 'password':
+            logger.warning("WARNING: Using default admin credentials in production environment!")
             
-        # For demo purposes, hardcoded credentials
-        # In production, you would validate against a database
-        if data.get('username') == 'admin' and data.get('password') == 'password':
+        if data.get('username') == admin_username and data.get('password') == admin_password:
             token = generate_token('admin')
+            logger.info(f"Successful login for user: {admin_username}")
             return jsonify({
                 'status': 'success',
                 'token': token,
                 'user': {
                     'id': 'admin',
-                    'username': 'admin'
+                    'username': admin_username
                 }
             })
         else:
+            logger.warning(f"Failed login attempt for username: {data.get('username')} from IP: {get_remote_address()}")
+            # Use a generic error message to avoid username enumeration
             return jsonify({'status': 'error', 'message': 'Invalid credentials'}), 401
     except Exception as e:
         logger.error(f"Error during login: {e}")
-        return jsonify({'status': 'error', 'message': str(e)}), 500
+        # Don't expose detailed error information to clients
+        return jsonify({'status': 'error', 'message': 'Authentication failed'}), 500
 
 @app.route('/configuration', methods=['GET'])
 def get_configuration():
@@ -481,6 +506,36 @@ def get_configuration():
     except Exception as e:
         logger.error(f"Error getting configuration: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route('/health')
+def health_check():
+    """Health check endpoint for monitoring"""
+    try:
+        # Check if the application is running
+        status = {
+            "status": "healthy",
+            "timestamp": datetime.utcnow().isoformat(),
+            "version": os.environ.get("APP_VERSION", "1.0.0"),
+            "environment": os.environ.get("FLASK_ENV", "development")
+        }
+        
+        # Check if Claude client is initialized
+        if claude_client:
+            status["claude_client"] = "available"
+        else:
+            status["claude_client"] = "unavailable"
+            
+        # Check if WebSocket server is running
+        status["websocket_server"] = "running" if socketio is not None else "not running"
+            
+        return jsonify(status)
+    except Exception as e:
+        logger.error(f"Health check failed: {e}")
+        return jsonify({
+            "status": "unhealthy",
+            "error": str(e),
+            "timestamp": datetime.utcnow().isoformat()
+        }), 500
 
 # WebSocket event handlers
 @socketio.on('connect')

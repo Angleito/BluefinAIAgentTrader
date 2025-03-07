@@ -267,3 +267,134 @@ Logs are stored in the `logs/` directory and provide detailed information about 
 - [Anthropic](https://www.anthropic.com/) for Claude AI
 - [Perplexity](https://www.perplexity.ai/) for their AI services
 - [TradingView](https://www.tradingview.com/) for chart data
+
+# Production Deployment
+
+This section provides instructions for deploying PerplexityTrader to a production environment.
+
+## Prerequisites
+
+Before deploying to production, ensure you have the following:
+
+- A server with Docker and Docker Compose installed
+- Sufficient RAM (minimum 4GB recommended)
+- Sufficient disk space for logs and data
+- API keys for all required services (Bluefin, Claude, Perplexity)
+- Domain name (optional, but recommended for secure access)
+
+## Security Considerations
+
+When deploying to production, follow these security best practices:
+
+1. **Environment Variables**:
+   - Never commit `.env` files to version control
+   - Use strong, unique values for `JWT_SECRET`
+   - Change default admin credentials (`ADMIN_USERNAME` and `ADMIN_PASSWORD`)
+
+2. **API Keys**:
+   - Use dedicated API keys for production
+   - Set appropriate permissions for each API key
+   - Implement key rotation schedules
+
+3. **Network Security**:
+   - Use HTTPS for all connections
+   - Configure firewalls to restrict access
+   - Consider using a VPN for administrative access
+
+4. **Trading Safety**:
+   - Start with `MOCK_TRADING=True` and test thoroughly
+   - Set conservative risk parameters
+   - Implement circuit breakers and monitoring
+
+## Deployment Steps
+
+1. **Clone the repository**:
+   ```bash
+   git clone https://github.com/yourusername/perplexitytrader.git
+   cd perplexitytrader
+   ```
+
+2. **Create and configure the environment file**:
+   ```bash
+   cp .env.example .env
+   # Edit .env with your production values
+   nano .env
+   ```
+
+3. **Run the deployment script**:
+   ```bash
+   ./deploy.sh
+   ```
+
+   This script will:
+   - Build the frontend for production
+   - Create necessary directories
+   - Build and start Docker containers
+   - Perform health checks
+
+4. **Verify deployment**:
+   - Check that all services are running: `docker-compose -f docker-compose.prod.yml ps`
+   - Access the frontend at `http://your-server-ip` (or your domain)
+   - Test API endpoints and WebSocket connections
+
+## Monitoring and Maintenance
+
+### Logs
+
+View logs for all services:
+```bash
+docker-compose -f docker-compose.prod.yml logs -f
+```
+
+View logs for a specific service:
+```bash
+docker-compose -f docker-compose.prod.yml logs -f backend
+```
+
+### Updating
+
+To update to the latest version:
+
+1. Pull the latest code:
+   ```bash
+   git pull
+   ```
+
+2. Rebuild and restart containers:
+   ```bash
+   docker-compose -f docker-compose.prod.yml down
+   ./deploy.sh
+   ```
+
+### Backup
+
+Regularly backup your data:
+```bash
+# Backup configuration and data
+tar -czf perplexitytrader-backup-$(date +%Y%m%d).tar.gz config/ data/ logs/ alerts/ .env
+```
+
+### Health Checks
+
+The system includes built-in health checks. You can also manually check service health:
+```bash
+curl http://localhost:5000/health
+```
+
+### Scaling
+
+For higher load scenarios, consider:
+- Increasing container resources in `docker-compose.prod.yml`
+- Implementing a load balancer for multiple backend instances
+- Using a dedicated database service instead of file storage
+
+## Troubleshooting
+
+If you encounter issues during deployment:
+
+1. Check container logs for errors
+2. Verify all required environment variables are set
+3. Ensure all ports are available
+4. Check disk space and system resources
+
+For persistent issues, refer to the GitHub issues page or contact support.
