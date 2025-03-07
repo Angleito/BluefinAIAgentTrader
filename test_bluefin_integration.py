@@ -67,6 +67,31 @@ async def test_bluefin_v2_client():
         account_details = await client.get_account_details()
         logger.info(f"✅ Account details: {account_details}")
         
+        # Test margin bank functions
+        # Based on https://bluefin-exchange.readme.io/reference/get-deposit-withdraw-usdc-from-marginbank
+        try:
+            # Get margin bank balance
+            margin_balance = await client.get_margin_bank_balance()
+            logger.info(f"✅ Margin bank balance: {margin_balance} USDC")
+            
+            # Test deposit (with a small amount for testing)
+            if margin_balance < 1:
+                deposit_amount = 0.1  # Small amount for testing
+                deposit_result = await client.deposit_margin_to_bank(deposit_amount)
+                logger.info(f"✅ Deposited {deposit_amount} USDC to margin bank: {deposit_result}")
+                
+                # Check updated balance
+                new_balance = await client.get_margin_bank_balance()
+                logger.info(f"✅ Updated margin bank balance: {new_balance} USDC")
+                
+                # Test withdraw (the same small amount)
+                withdraw_result = await client.withdraw_margin_from_bank(deposit_amount)
+                logger.info(f"✅ Withdrew {deposit_amount} USDC from margin bank: {withdraw_result}")
+            else:
+                logger.info("✅ Skipping deposit/withdraw test as margin balance is sufficient")
+        except Exception as e:
+            logger.error(f"❌ Error testing margin bank functions: {e}")
+        
         return True
     except ImportError as e:
         logger.error(f"❌ Failed to import Bluefin v2 client: {e}")
