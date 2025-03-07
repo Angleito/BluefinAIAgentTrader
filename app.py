@@ -9,7 +9,7 @@ import jwt
 from datetime import datetime, timedelta
 from functools import wraps
 from flask import Flask, request, jsonify, g, render_template
-from flask_socketio import SocketIO, request as socketio_request
+from flask_socketio import SocketIO
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from anthropic import Client
@@ -541,12 +541,12 @@ def health_check():
 @socketio.on('connect')
 def handle_connect():
     """Handle client connection"""
-    logger.info(f"Client connected: {socketio_request.sid}")
+    logger.info(f"Client connected")
 
 @socketio.on('disconnect')
 def handle_disconnect():
     """Handle client disconnection"""
-    logger.info(f"Client disconnected: {socketio_request.sid}")
+    logger.info(f"Client disconnected")
 
 # Function to emit updates to connected clients
 def emit_update(event_type, data):

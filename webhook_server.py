@@ -259,17 +259,19 @@ def simulate_webhook():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 if __name__ == "__main__":
-    port = int(os.getenv("WEBHOOK_PORT", 5001))
-    debug_mode = os.getenv("FLASK_DEBUG", "false").lower() == "true"
+    # Set up Flask app
+    debug_mode = os.getenv("FLASK_DEBUG", "False").lower() in ("true", "1", "t", "yes")
+    port = int(os.getenv("WEBHOOK_PORT", 5002))
+    host = os.getenv("WEBHOOK_HOST", "0.0.0.0")
     
-    # Print instructions for TradingView alerts
-    print(f"\n{'='*50}")
+    # Print startup message
+    print("\n==================================================")
     print("TradingView Webhook Server")
-    print(f"{'='*50}")
+    print("==================================================")
     print(f"Listening on port: {port}")
     print(f"Debug mode: {'Enabled' if debug_mode else 'Disabled'}")
     print("To use with TradingView alerts, set up ngrok and use the webhook URL in TradingView.")
-    print(f"{'='*50}\n")
+    print("==================================================\n")
     
-    # Run the Flask app
-    app.run(host="0.0.0.0", port=port, debug=debug_mode) 
+    # Start the Flask app
+    app.run(host=host, port=port, debug=debug_mode) 

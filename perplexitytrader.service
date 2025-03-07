@@ -1,0 +1,27 @@
+[Unit]
+Description=PerplexityTrader Trading Agent
+After=network.target
+
+[Service]
+Type=simple
+User=angle
+WorkingDirectory=/home/angle/perpleixtytrader
+ExecStart=/home/angle/perpleixtytrader/bluefin_env/bin/python /home/angle/perpleixtytrader/agent.py
+Restart=always
+RestartSec=10
+Environment="MOCK_TRADING=False"
+Environment="FLASK_ENV=production"
+Environment="FLASK_DEBUG=false"
+Environment="PORT=5000"
+Environment="WEBHOOK_PORT=8000"
+Environment="SOCKET_PORT=5001"
+Environment="BLUEFIN_NETWORK=MAINNET"
+Environment="DEFAULT_SYMBOL=SUI/USD"
+Environment="DEFAULT_TIMEFRAME=5m"
+Environment="DEFAULT_LEVERAGE=12"
+Environment="DEFAULT_POSITION_SIZE_PCT=1"
+Environment="DEFAULT_STOP_LOSS_PCT=0.15"
+Environment="DEFAULT_MAX_POSITIONS=3"
+
+[Install]
+WantedBy=multi-user.target 

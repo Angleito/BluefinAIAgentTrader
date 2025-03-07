@@ -70,6 +70,16 @@ import uvicorn
 from fastapi import FastAPI, Request
 import glob
 
+# Fix the import for mock_perplexity
+try:
+    from .mock_perplexity import MockPerplexityClient
+except ImportError:
+    # Fallback for direct script execution
+    try:
+        from mock_perplexity import MockPerplexityClient
+    except ImportError:
+        from core.mock_perplexity import MockPerplexityClient
+
 # Configure logging first
 def setup_logging():
     """Set up logging configuration."""
@@ -596,9 +606,6 @@ def init_clients():
 def get_timestamp():
     """Get current timestamp in YYYYMMDD_HHMMSS format"""
     return datetime.now().strftime("%Y%m%d_%H%M%S")
-
-# Import mock perplexity client
-from mock_perplexity import MockPerplexityClient
 
 def opposite_type(order_type: str) -> str:
     """Get the opposite order type (BUY -> SELL, SELL -> BUY)"""
@@ -1258,6 +1265,15 @@ app = FastAPI(title="Trading Agent API", description="API for the trading agent"
 @app.get("/")
 async def root():
     return {"status": "online", "message": "Trading Agent API is running"}
+
+@app.get("/health")
+async def health_check():
+    """Simple health check endpoint."""
+    return {
+        "status": "OK", 
+        "timestamp": datetime.now().isoformat(),
+        "version": "1.0.0"
+    }
 
 @app.get("/status")
 async def get_status():
