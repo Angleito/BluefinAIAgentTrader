@@ -18,8 +18,9 @@ async def analyze_chart(chart_image):
         dict: Analysis result with trade confirmation and reasoning
     """
     if not chart_image:
-        logger.error("No chart image provided for analysis")
-        return {"trade_confirmed": False, "reason": "No chart image provided"}
+        error_msg = "No chart image provided for analysis"
+        logger.error(error_msg)
+        return {"status": "error", "message": error_msg}
     
     try:
         # Convert image to base64 for API request
@@ -38,8 +39,9 @@ async def analyze_chart(chart_image):
         return parsed_result
         
     except Exception as e:
-        logger.exception(f"Error analyzing chart: {e}")
-        return {"trade_confirmed": False, "reason": f"Error analyzing chart: {str(e)}"}
+        error_msg = f"Error analyzing chart: {str(e)}"
+        logger.exception(error_msg)
+        return {"status": "error", "message": error_msg}
 
 def create_analysis_prompt(image_base64):
     """
@@ -79,6 +81,9 @@ async def call_perplexity_api(prompt):
         
     Returns:
         str: The analysis result from Perplexity
+        
+    Raises:
+        PerplexityAPIError: If there is an error calling the API or parsing the response
     """
     headers = {
         "Authorization": f"Bearer {PERPLEXITY_CONFIG['api_key']}",
@@ -106,16 +111,19 @@ async def call_perplexity_api(prompt):
             json=data
         )
         
-        if response.status_code == 200:
-            result = response.json()
-            content = result["choices"][0]["message"]["content"]
-            return content
-        else:
-            logger.error(f"Error calling Perplexity API: {response.status_code} - {response.text}")
-            return None
+        if response.status_code != 200:
+            error_msg = f"Perplexity API returned an error: {response.status_code} - {response.text}"
+            logger.error(error_msg)
+            raise PerplexityAPIError(error_msg)
+        
+        result = response.json()
+        content = result["choices"][0]["message"]["content"]
+        return content
+    
     except Exception as e:
-        logger.exception(f"Exception calling Perplexity API: {e}")
-        return None
+        error_msg = f"Error calling Perplexity API: {str(e)}"
+        logger.exception(error_msg) 
+        raise PerplexityAPIError(error_msg)
 
 def parse_analysis_result(analysis_text):
     """
@@ -152,4 +160,8 @@ def parse_analysis_result(analysis_text):
         "trade_confirmed": trade_confirmed,
         "confidence": confidence,
         "reason": reason
-    } 
+    }
+
+class PerplexityAPIError(Exception):
+    """Custom exception for Perplexity API errors."""
+    pass 
