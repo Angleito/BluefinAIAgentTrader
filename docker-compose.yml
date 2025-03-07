@@ -53,7 +53,7 @@ services:
       - DEFAULT_POSITION_SIZE_PCT=${DEFAULT_POSITION_SIZE_PCT:-0.05}
       - DEFAULT_STOP_LOSS_PCT=${DEFAULT_STOP_LOSS_PCT:-0.15}
       - DEFAULT_MAX_POSITIONS=${DEFAULT_MAX_POSITIONS:-3}
-      - MOCK_TRADING=False
+      - MOCK_TRADING=True
     volumes:
       - ./logs:/app/logs
       - ./alerts:/app/alerts  
