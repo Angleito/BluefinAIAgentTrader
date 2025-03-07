@@ -1,6 +1,7 @@
 import { io, Socket } from 'socket.io-client';
 
 const API_BASE_URL = 'http://localhost:5000';
+const SOCKET_URL = 'http://localhost:5001';
 let socket: Socket | null = null;
 
 // WebSocket functions
@@ -10,7 +11,7 @@ export function connectSocket(onConnect?: () => void, onDisconnect?: () => void)
     return socket;
   }
 
-  socket = io(API_BASE_URL);
+  socket = io(SOCKET_URL);
   
   socket.on('connect', () => {
     console.log('Connected to WebSocket server');

@@ -9,7 +9,7 @@ import threading
 from core.config import TRADING_PARAMS, RISK_PARAMS, AI_PARAMS
 import jwt
 from functools import wraps
-from flask_socketio import SocketIO
+from flask_socketio import SocketIO, request as socketio_request
 
 # Setup logging
 logging.basicConfig(
@@ -266,24 +266,14 @@ def webhook():
 
 @app.route('/api/process_alert', methods=['POST'])
 def process_vmanchu_alert():
-    """
-    Process alerts from the VuManChu Cipher B indicator
-    
-    Expected format:
-    {
-        "passphrase": "your_secret_key",  # Optional security
-        "indicator": "vmanchu_cipher_b",
-        "symbol": "SUI/USD",
-        "timeframe": "5m",
-        "action": "BUY" or "SELL",
-        "signal_type": "WAVE1", "WAVE2", "RSI_BULL", etc.
-        "timestamp": "2023-01-01T12:00:00Z"
-    }
-    """
+    """Process a VuManChu Cipher B alert from TradingView"""
     try:
         data = request.json
-        logger.info(f"Received VuManChu Cipher B alert: {json.dumps(data)}")
         
+        # Check if data is None
+        if data is None:
+            return jsonify({"status": "error", "message": "No JSON data provided"}), 400
+            
         # Validate required fields
         required_fields = ["symbol", "timeframe", "action", "indicator"]
         missing_fields = [field for field in required_fields if field not in data]
@@ -292,38 +282,41 @@ def process_vmanchu_alert():
             return jsonify({"status": "error", "message": f"Missing required fields: {', '.join(missing_fields)}"}), 400
         
         # Verify indicator is VuManChu Cipher B
-        if data.get("indicator").lower() != "vmanchu_cipher_b":
+        indicator = data.get("indicator", "").lower()
+        if indicator != "vmanchu_cipher_b":
             return jsonify({"status": "error", "message": "Only VuManChu Cipher B alerts are supported by this endpoint"}), 400
             
         # Map to our existing parameters format
-        symbol = data.get("symbol")
-        timeframe = data.get("timeframe")
-        action = data.get("action").upper()
+        symbol = data.get("symbol", "")
+        timeframe = data.get("timeframe", "")
+        action = data.get("action", "").upper()
         signal_type = data.get("signal_type", "UNKNOWN")
         
         # Save the alert to a file for reference
         os.makedirs("alerts", exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"alerts/vmanchu_alert_{timestamp}_{symbol.replace('/', '_')}.json"
-        
         with open(filename, "w") as f:
-            json.dump(data, f)
-        
+            json.dump(data, f, indent=2)
         logger.info(f"Saved VuManChu alert to {filename}")
         
-        # Start the analysis and trading decision process
-        threading.Thread(target=process_cipher_b_signal, 
-                         args=(symbol, timeframe, action, signal_type, data)).start()
+        # Process the signal
+        logger.info(f"Processing {signal_type} signal for {symbol} on {timeframe}")
         
-        return jsonify({
-            "status": "success",
-            "message": f"Processing VuManChu Cipher B {action} signal for {symbol} on {timeframe}",
-            "signal_type": signal_type,
-            "timestamp": timestamp
-        })
+        # Determine trade direction
+        is_bullish = action == "BUY"
+        logger.info(f"Trade direction: {'Bullish' if is_bullish else 'Bearish'}, Action: {action}")
         
+        # Run the agent with this signal
+        try:
+            result = process_cipher_b_signal(symbol, timeframe, action, signal_type, data)
+            return jsonify({"status": "success", "message": "Alert processed", "result": result})
+        except Exception as e:
+            logger.error(f"Error running agent for VuManChu signal: {e}")
+            return jsonify({"status": "error", "message": f"Error processing signal: {str(e)}"}), 500
+            
     except Exception as e:
-        logger.error(f"Error processing VuManChu alert: {str(e)}", exc_info=True)
+        logger.error(f"Error processing VuManChu alert: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
 def process_cipher_b_signal(symbol, timeframe, action, signal_type, alert_data):
@@ -493,12 +486,12 @@ def get_configuration():
 @socketio.on('connect')
 def handle_connect():
     """Handle client connection"""
-    logger.info(f"Client connected: {request.sid}")
+    logger.info(f"Client connected: {socketio_request.sid}")
 
 @socketio.on('disconnect')
 def handle_disconnect():
     """Handle client disconnection"""
-    logger.info(f"Client disconnected: {request.sid}")
+    logger.info(f"Client disconnected: {socketio_request.sid}")
 
 # Function to emit updates to connected clients
 def emit_update(event_type, data):
@@ -512,4 +505,4 @@ if __name__ == '__main__':
     os.makedirs("data", exist_ok=True)
     
     # Start the Flask-SocketIO server
-    socketio.run(app, host='0.0.0.0', port=5000, debug=True) 
+    socketio.run(app, host='0.0.0.0', port=5001, debug=True) 
