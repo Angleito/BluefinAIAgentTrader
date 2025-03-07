@@ -241,6 +241,13 @@ class MockBluefinClient:
         self.network = network or MockNetworks.TESTNET
         self.private_key = private_key or "mock_private_key"
         self.are_terms_accepted = are_terms_accepted
+        self.leverage_settings = {
+            'BTC-PERP': 5,
+            'ETH-PERP': 5,
+            'SUI-PERP': 5,
+            'SOL-PERP': 5,
+            'BNB-PERP': 5
+        }
         logger.info(f"Initialized MockBluefinClient on {self.network}")
         
     async def init(self, onboard_user=False):
@@ -387,8 +394,29 @@ class MockBluefinClient:
         return {"available": 10000.0, "total": 10000.0}
         
     async def get_user_leverage(self, symbol):
-        """Mock implementation of get_user_leverage"""
-        return 5.0
+        """Mock implementation of get_user_leverage
+        Based on https://bluefin-exchange.readme.io/reference/get-adjust-leverage
+        """
+        # Return default leverage if symbol not found
+        leverage = self.leverage_settings.get(symbol, 5)
+        logger.info(f"[MOCK] Getting leverage for {symbol}: {leverage}x")
+        return leverage
+        
+    async def adjust_leverage(self, symbol, leverage):
+        """Mock implementation of adjust_leverage
+        Based on https://bluefin-exchange.readme.io/reference/get-adjust-leverage
+        """
+        if leverage < 1 or leverage > 20:
+            raise ValueError(f"Leverage must be between 1 and 20, got {leverage}")
+            
+        # Update leverage setting
+        self.leverage_settings[symbol] = leverage
+        logger.info(f"[MOCK] Adjusted leverage for {symbol} to {leverage}x")
+        return {
+            "symbol": symbol,
+            "leverage": leverage,
+            "success": True
+        }
 
 # Define mock client for testing if no libraries are available
 if BluefinClient is None:
@@ -1158,7 +1186,7 @@ def parse_perplexity_analysis(analysis, ticker):
         
     return recommendation
 
-async def execute_trade(symbol: str, side: str, position_size: float = None, risk_percentage: float = None, stop_loss_percentage: float = None):
+async def execute_trade(symbol: str, side: str, position_size: float = None, risk_percentage: float = None, stop_loss_percentage: float = None, leverage: int = None):
     """
     Execute a real trade on the Bluefin exchange.
     
@@ -1168,6 +1196,7 @@ async def execute_trade(symbol: str, side: str, position_size: float = None, ris
     - position_size: The size of the position to open (optional, will be calculated if not provided)
     - risk_percentage: The percentage of account to risk (optional)
     - stop_loss_percentage: The percentage for stop loss (optional)
+    - leverage: The leverage to use for the trade (optional, default from config)
     
     It first initializes the Bluefin client (if not already initialized) based on the available
     client libraries and configuration. It then attempts to place the order using the appropriate
@@ -1191,7 +1220,7 @@ async def execute_trade(symbol: str, side: str, position_size: float = None, ris
         logger.info(f"Executing real trade: {side} {position_size} of {symbol}")
         
         # Get parameters for symbol
-        leverage = int(os.getenv("DEFAULT_LEVERAGE", "5"))
+        leverage_value = leverage or int(os.getenv("DEFAULT_LEVERAGE", "5"))
         
         # Initialize Bluefin client if needed
         global client
@@ -1206,14 +1235,11 @@ async def execute_trade(symbol: str, side: str, position_size: float = None, ris
                     if Networks is not None:
                         if hasattr(Networks, network_name):
                             network_value = getattr(Networks, network_name)
-                        elif hasattr(Networks, f"SUI_{network_name}"):
-                            network_value = getattr(Networks, f"SUI_{network_name}")
-                        # Fallback to mainnet string
-                        else:
-                            network_value = "mainnet" if network_name.lower() == "mainnet" else "testnet"
-                    else:
-                        # Networks not defined, use string
-                        network_value = "mainnet" if network_name.lower() == "mainnet" else "testnet"
+                        elif network_name.lower() in ["mainnet", "testnet"]:
+                            network_value = getattr(Networks, network_name.upper(), None)
+                            
+                    if network_value is None:
+                        network_value = Networks.TESTNET  # Default fallback
                         
                     logger.info(f"Using network: {network_value}")
                     client = BluefinClient(private_key=os.getenv("BLUEFIN_PRIVATE_KEY"), network=network_value)
@@ -1230,6 +1256,9 @@ async def execute_trade(symbol: str, side: str, position_size: float = None, ris
                 logger.warning("No Bluefin client available, using mock client")
                 client = MockBluefinClient()
         
+        # Ensure leverage is set correctly
+        await ensure_leverage(symbol, leverage_value)
+        
         # Create order - handling different client implementations
         try:
             # Try direct method
@@ -1238,14 +1267,14 @@ async def execute_trade(symbol: str, side: str, position_size: float = None, ris
                     symbol=symbol,
                     side=side,
                     size=position_size,
-                    leverage=leverage
+                    leverage=leverage_value
                 )
             elif hasattr(client, "place_order"):
                 order = await client.place_order(
                     symbol=symbol,
                     side=side, 
                     size=position_size,
-                    leverage=leverage
+                    leverage=leverage_value
                 )
             else:
                 # Last resort for mock client
@@ -1268,12 +1297,22 @@ async def execute_trade(symbol: str, side: str, position_size: float = None, ris
                 "status": "error",
                 "error": str(e)
             }
-        
-        logger.info(f"Trade executed successfully: Order ID {order.get('id', 'unknown')}")
+            
+        logger.info(f"Order created: {order}")
         return order
+        
     except Exception as e:
-        logger.error(f"Failed to execute trade: {e}", exc_info=True)
-        raise
+        logger.error(f"Error executing trade: {e}")
+        logger.error(traceback.format_exc())
+        # Return a mock order on failure
+        return {
+            "id": f"error_{get_timestamp()}",
+            "symbol": symbol,
+            "side": side,
+            "size": position_size if position_size is not None else 0,
+            "status": "error",
+            "error": str(e)
+        }
 
 async def process_alerts():
     """
@@ -1600,6 +1639,45 @@ async def get_market_price(symbol):
         logger.error(traceback.format_exc())
         # Return a safe default
         return 100
+
+async def ensure_leverage(symbol, target_leverage):
+    """
+    Ensure that the leverage for a symbol is set to the target value.
+    
+    Args:
+        symbol (str): The trading symbol (e.g., 'BTC-PERP')
+        target_leverage (int): The desired leverage value
+        
+    Returns:
+        bool: True if leverage is set successfully, False otherwise
+    """
+    global client
+    
+    try:
+        # Get current leverage
+        current_leverage = await client.get_user_leverage(symbol)
+        logger.info(f"Current leverage for {symbol}: {current_leverage}x")
+        
+        # Check if adjustment is needed
+        if current_leverage == target_leverage:
+            logger.info(f"Leverage for {symbol} already set to {target_leverage}x")
+            return True
+            
+        # Adjust leverage
+        logger.info(f"Adjusting leverage for {symbol} from {current_leverage}x to {target_leverage}x")
+        result = await client.adjust_leverage(symbol, target_leverage)
+        
+        if isinstance(result, dict) and result.get('success', False):
+            logger.info(f"Successfully adjusted leverage for {symbol} to {target_leverage}x")
+            return True
+        else:
+            logger.warning(f"Failed to adjust leverage for {symbol}: {result}")
+            return False
+            
+    except Exception as e:
+        logger.error(f"Error adjusting leverage for {symbol}: {e}")
+        logger.error(traceback.format_exc())
+        return False
 
 if __name__ == "__main__":
     asyncio.run(main())

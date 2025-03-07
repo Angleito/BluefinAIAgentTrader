@@ -91,6 +91,31 @@ async def test_bluefin_v2_client():
                 logger.info("✅ Skipping deposit/withdraw test as margin balance is sufficient")
         except Exception as e:
             logger.error(f"❌ Error testing margin bank functions: {e}")
+            
+        # Test leverage functions
+        # Based on https://bluefin-exchange.readme.io/reference/get-adjust-leverage
+        try:
+            # Test symbol
+            test_symbol = "SUI-PERP"
+            
+            # Get current leverage
+            current_leverage = await client.get_user_leverage(test_symbol)
+            logger.info(f"✅ Current leverage for {test_symbol}: {current_leverage}x")
+            
+            # Adjust leverage (to a different value)
+            new_leverage = 10 if current_leverage != 10 else 5
+            leverage_result = await client.adjust_leverage(test_symbol, new_leverage)
+            logger.info(f"✅ Adjusted leverage for {test_symbol} to {new_leverage}x: {leverage_result}")
+            
+            # Verify the change
+            updated_leverage = await client.get_user_leverage(test_symbol)
+            logger.info(f"✅ Updated leverage for {test_symbol}: {updated_leverage}x")
+            
+            # Reset to original leverage
+            reset_result = await client.adjust_leverage(test_symbol, current_leverage)
+            logger.info(f"✅ Reset leverage for {test_symbol} to {current_leverage}x: {reset_result}")
+        except Exception as e:
+            logger.error(f"❌ Error testing leverage functions: {e}")
         
         return True
     except ImportError as e:
