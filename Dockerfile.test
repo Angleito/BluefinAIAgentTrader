@@ -1,4 +1,4 @@
-# Use Python 3.10 as the base image
+# Test Dockerfile to verify Bluefin client libraries
 FROM python:3.10-slim
 
 # Set working directory
@@ -12,8 +12,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements file
+# Copy requirements file and test script
 COPY requirements.txt .
+COPY test_docker_env.py .
+COPY .env .
 
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
@@ -26,21 +28,5 @@ RUN pip install --no-cache-dir git+https://github.com/fireflyprotocol/bluefin-v2
 RUN pip install playwright
 RUN playwright install chromium
 
-# Copy application code
-COPY . .
-
-# Create necessary directories
-RUN mkdir -p logs alerts screenshots analysis
-
-# Set environment variables
-ENV PYTHONUNBUFFERED=1 \
-    FLASK_APP=webhook_server.py \
-    FLASK_ENV=production \
-    FLASK_DEBUG=false \
-    WEBHOOK_PORT=5001
-
-# Expose the webhook port
-EXPOSE 5001
-
-# Run the webhook server
-CMD ["python", "webhook_server.py"] 
+# Run the comprehensive environment test script
+CMD ["python", "test_docker_env.py"] 
