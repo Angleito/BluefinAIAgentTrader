@@ -52,8 +52,12 @@ from dotenv import load_dotenv
 try:
     from playwright.async_api import async_playwright
     from playwright.sync_api import sync_playwright
+    PLAYWRIGHT_AVAILABLE = True
 except ImportError:
     logging.warning("Playwright not installed. Browser automation will not work.")
+    PLAYWRIGHT_AVAILABLE = False
+    async_playwright = None
+    sync_playwright = None
 from typing import Dict, List, Optional, Union, Any, TypeVar, Type, cast
 import requests
 import base64
@@ -64,6 +68,7 @@ import tempfile
 import argparse
 import uvicorn
 from fastapi import FastAPI, Request
+import glob
 
 # Configure logging first
 logging.basicConfig(
@@ -140,9 +145,7 @@ ORDER_TYPE = ORDER_TYPE_ENUM
 
 # Type definitions to help with linting
 # Use Any instead of TypeVar for better compatibility with linter
-BluefinClientType = Any
-NetworksType = Any
-OrderSignatureRequestType = Any
+BluefinClientType = TypeVar('BluefinClientType')
 
 # Create a class that can be used as a type hint for BluefinClient
 class BaseBluefinClient:
@@ -150,18 +153,44 @@ class BaseBluefinClient:
     async def get_account_equity(self): pass
     async def create_order(self, **kwargs): pass
 
-# Now set BluefinClient to this base class for type checking
-BLUEFIN_CLIENT_SUI_AVAILABLE = False
-BLUEFIN_V2_CLIENT_AVAILABLE = False
-BluefinClient = BaseBluefinClient
+# Define BluefinClient as None initially
+BluefinClient = None
 
-# Set up variables for Bluefin clients
-Networks = None
-OrderSignatureRequest = None
-NETWORKS = {
-    "testnet": "testnet",
-    "mainnet": "mainnet"
-}
+# Try to import SUI client first
+try:
+    # Ignore import errors here since these are optional dependencies
+    from bluefin_client_python_sui import Client as BluefinSUIClient  # type: ignore
+    from bluefin_client_python_sui import Networks as SUINetworks  # type: ignore
+    BLUEFIN_CLIENT_SUI_AVAILABLE = True
+    BluefinClient = BluefinSUIClient
+    Networks = SUINetworks
+    logger.info("Bluefin SUI client available")
+except ImportError:
+    logger.warning("Bluefin SUI client not available, will try v2 client")
+    BLUEFIN_CLIENT_SUI_AVAILABLE = False
+    
+    # Try to import V2 client
+    try:
+        # Ignore import errors here since these are optional dependencies
+        from bluefin_v2_client_python import Client as BluefinV2Client  # type: ignore
+        from bluefin_v2_client_python import Network as V2Networks  # type: ignore
+        BLUEFIN_V2_CLIENT_AVAILABLE = True
+        BluefinClient = BluefinV2Client
+        Networks = V2Networks
+        logger.info("Bluefin v2 client available")
+    except ImportError:
+        logger.warning("Bluefin v2 client not available")
+        BLUEFIN_V2_CLIENT_AVAILABLE = False
+        logger.warning("Running in simulation mode without actual trading capabilities")
+        print("WARNING: No Bluefin client libraries found. Using mock implementation.")
+        print("Please install one of the following:")
+        print("   pip install git+https://github.com/fireflyprotocol/bluefin-client-python-sui.git")
+        print("   pip install git+https://github.com/fireflyprotocol/bluefin-v2-client-python.git")
+
+# Warn if no Bluefin client libraries are available
+if not BLUEFIN_CLIENT_SUI_AVAILABLE and not BLUEFIN_V2_CLIENT_AVAILABLE:
+    logger.warning("No Bluefin client available, running in simulation mode")
+    logger.info("Using MockBluefinClient for simulation")
 
 # Create Networks mock class for the mock BluefinClient
 class MockNetworks:
@@ -175,80 +204,68 @@ Networks = MockNetworks()
 # Update BluefinClient variable definition
 BluefinClient = None  # Will be set to either the real client or MockBluefinClient
 
-# Update the mock BluefinClient to handle missing methods
+# Update the mock BluefinClient to handle all methods needed
 class MockBluefinClient:
-    """Mock implementation of BluefinClient for simulation mode"""
+    """Mock implementation of the Bluefin client for testing and development"""
     
     def __init__(self, *args, **kwargs):
-        self.args = args
-        self.kwargs = kwargs
-        logger.info("Using MockBluefinClient for simulation")
-    
+        self.network = kwargs.get('network', 'testnet')
+        self.api_key = kwargs.get('api_key', 'mock_api_key')
+        self.private_key = kwargs.get('private_key', 'mock_private_key')
+        logger.info(f"Initialized MockBluefinClient on {self.network}")
+        
     async def close_position(self, position_id):
-        logger.info(f"[SIMULATION] Closing position {position_id}")
-        return {"status": "success", "position_id": position_id}
-    
+        """Mock implementation of close_position"""
+        logger.info(f"[MOCK] Closing position {position_id}")
+        return {"success": True, "position_id": position_id, "status": "closed"}
+        
     async def get_account_equity(self):
-        logger.info("[SIMULATION] Getting account equity")
-        return 10000.0  # Return a mock equity value
-    
+        """Mock implementation of get_account_equity"""
+        equity = float(os.getenv("MOCK_ACCOUNT_EQUITY", "10000.0"))
+        logger.info(f"[MOCK] Getting account equity: {equity}")
+        return equity
+        
     async def create_order(self, symbol, side, size, **kwargs):
-        logger.info(f"[SIMULATION] Creating {side} order for {size} {symbol}")
+        """Mock implementation of create_order"""
+        order_id = f"mock_order_{get_timestamp()}"
+        logger.info(f"[MOCK] Creating {side} order for {symbol}, size: {size}")
         return {
-            "id": f"sim_{get_timestamp()}",
+            "order_id": order_id,
             "symbol": symbol,
             "side": side,
             "size": size,
-            "status": "filled"
+            "status": "filled",
+            "type": kwargs.get("type", "LIMIT"),
+            "price": kwargs.get("price", 0.0),
+            "timestamp": get_timestamp()
         }
-
-# Try to import SUI client first
-try:
-    # Disable linter warnings for imports that might not be available
-    # pylint: disable=import-error
-    # type: ignore
-    # These imports may fail if the library is not installed, but the code handles this gracefully
-    # fmt: off
-    from bluefin_client_sui import (  # type: ignore # noqa
-        BluefinClient as SUIBluefinClient,
-        Networks as SUINetworks,
-        ORDER_SIDE as SUI_ORDER_SIDE,
-        ORDER_TYPE as SUI_ORDER_TYPE,
-        OrderSignatureRequest as SuiOrderSignatureRequest
-    )
-    # fmt: on
-    
-    # Use type: ignore to suppress typing errors due to dynamic assignment
-    BluefinClient = SUIBluefinClient  # type: ignore
-    Networks = SUINetworks
-    ORDER_SIDE = SUI_ORDER_SIDE
-    ORDER_TYPE = SUI_ORDER_TYPE
-    OrderSignatureRequest = SuiOrderSignatureRequest
-    BLUEFIN_CLIENT_SUI_AVAILABLE = True
-    logger.info("Successfully imported Bluefin SUI client")
-except ImportError:
-    logger.warning("Bluefin SUI client not available, will try v2 client")
-    # Try to import v2 client as fallback
-    try:
-        from bluefin.v2.client import BluefinClient as V2BluefinClient  # type: ignore # noqa
-        from bluefin.v2.types import OrderSignatureRequest as V2OrderSignatureRequest  # type: ignore # noqa
-        # Assign the imported classes to our variables
-        BluefinClient = V2BluefinClient  # type: ignore
-        OrderSignatureRequest = V2OrderSignatureRequest
-        BLUEFIN_V2_CLIENT_AVAILABLE = True
-        logger.info("Successfully imported Bluefin v2 client")
-    except ImportError:
-        logger.warning("Bluefin v2 client not available")
-        logger.warning("Running in simulation mode without actual trading capabilities")
-        # Define BluefinClient as Any to suppress type errors
-        BluefinClient = Any  # type: ignore
-
-# Warn if no Bluefin client libraries are available
-if not BLUEFIN_CLIENT_SUI_AVAILABLE and not BLUEFIN_V2_CLIENT_AVAILABLE:
-    print("WARNING: No Bluefin client libraries found. Using mock implementation.")
-    print("Please install one of the following:")
-    print("   pip install git+https://github.com/fireflyprotocol/bluefin-client-python-sui.git")
-    print("   pip install git+https://github.com/fireflyprotocol/bluefin-v2-client-python.git")
+        
+    async def place_order(self, **kwargs):
+        """Mock implementation of place_order"""
+        # Just redirect to create_order for consistency
+        return await self.create_order(
+            kwargs.get("symbol", "UNKNOWN"),
+            kwargs.get("side", "BUY"),
+            kwargs.get("size", 0.1),
+            **kwargs
+        )
+        
+    async def close_session(self):
+        """Mock implementation of close_session"""
+        logger.info("[MOCK] Closing session")
+        return True
+        
+    async def get_user_positions(self):
+        """Mock implementation of get_user_positions"""
+        return []
+        
+    async def get_user_margin(self):
+        """Mock implementation of get_user_margin"""
+        return {"available": 10000.0, "total": 10000.0}
+        
+    async def get_user_leverage(self, symbol):
+        """Mock implementation of get_user_leverage"""
+        return 5.0
 
 # Define mock client for testing if no libraries are available
 if BluefinClient is None:
@@ -316,23 +333,23 @@ if BluefinClient is None:
             print(f"Mock: Placing {kwargs.get('side')} order")
             return {"orderId": "mock_order_id"}
 
-# Define mock OrderSignatureRequest class that will be used as a fallback
+# Define a mock OrderSignatureRequest class for simulation
 class MockOrderSignatureRequest:
+    """Mock OrderSignatureRequest for simulation"""
     def __init__(self, *args, **kwargs):
-        self.symbol = kwargs.get('symbol', 'SUI-PERP')
-        self.price = kwargs.get('price', 1.0)
-        self.quantity = kwargs.get('quantity', 1.0)
-        self.side = kwargs.get('side', ORDER_SIDE.BUY)
-        self.type = kwargs.get('type', ORDER_TYPE.MARKET)
-        self.leverage = kwargs.get('leverage', 5)
-        self.post_only = kwargs.get('post_only', False)
-        self.reduce_only = kwargs.get('reduce_only', False)
-        self.time_in_force = kwargs.get('time_in_force', 'GoodTillTime')
-        self.expiration = kwargs.get('expiration', int(time.time()) + 604800)  # 1 week
+        self.args = args
+        self.kwargs = kwargs
+        
+    def get_signature_hash(self):
+        """Return a mock signature hash"""
+        return "0x" + "0" * 64
+        
+    def get_order_hash(self):
+        """Return a mock order hash"""
+        return "0x" + "1" * 64
 
-# Use the mock class if OrderSignatureRequest is None
-if OrderSignatureRequest is None:
-    OrderSignatureRequest = MockOrderSignatureRequest
+# Set OrderSignatureRequest to the mock class by default
+OrderSignatureRequest = MockOrderSignatureRequest
 
 def setup_logging():
     """Set up logging configuration."""
@@ -491,406 +508,13 @@ def opposite_type(order_type: str) -> str:
     """Get the opposite order type (BUY -> SELL, SELL -> BUY)"""
     return "BUY" if order_type == "SELL" else "SELL"
 
-async def analyze_tradingview_chart(symbol, timeframe="1D"):
-    """Analyze a TradingView chart using AI"""
-    logger.info(f"Analyzing TradingView chart for {symbol} on {timeframe} timeframe")
-    
-    # Create temporary directory for screenshot
-    with tempfile.TemporaryDirectory() as tmpdir:
-        screenshot_path = os.path.join(tmpdir, f"{symbol}_{timeframe}_chart.png")
-        
-        try:
-            # Setup Playwright
-            async with async_playwright() as p:
-                # Launch browser
-                browser = await p.chromium.launch(headless=True)
-                page = await browser.new_page()
-                
-                # Navigate to TradingView
-                tradingview_url = f"https://www.tradingview.com/chart/?symbol={symbol}&interval={timeframe}"
-                logger.info(f"Navigating to {tradingview_url}")
-                await page.goto(tradingview_url, timeout=60000)
-                
-                # Wait for chart to load
-                logger.info("Waiting for chart to load")
-                await page.wait_for_selector(".chart-markup-table", timeout=30000)
-                
-                # Additional wait for chart elements to render
-                await asyncio.sleep(5)
-                
-                # Take screenshot of chart
-                logger.info(f"Taking screenshot of {symbol} chart")
-                chart_element = await page.query_selector(".chart-markup-table")
-                if chart_element:
-                    await chart_element.screenshot(path=screenshot_path)
-                else:
-                    logger.error("Could not find chart element for screenshot")
-                    return None
-                
-                # Close browser
-                await browser.close()
-                
-            # First, try to analyze chart with Claude 3.7 Sonnet
-            logger.info(f"Attempting chart analysis with Claude 3.7 Sonnet for {symbol}")
-            claude_analysis = await analyze_chart_with_claude(screenshot_path, symbol)
-            
-            if claude_analysis and "error" not in claude_analysis:
-                logger.info(f"Chart analysis with Claude successful for {symbol}")
-                return claude_analysis
-            else:
-                logger.warning(f"Chart analysis with Claude failed for {symbol}, falling back to Perplexity")
-            
-            # If Claude fails, fall back to Perplexity with sonar-pro model  
-            logger.info(f"Using Perplexity sonar-pro to analyze {symbol} chart")
-            perplexity_analysis = analyze_chart_with_perplexity(screenshot_path, symbol)
-            
-            if not perplexity_analysis:
-                logger.error("Failed to get Perplexity analysis")
-                return None
-                
-            # Extract trading decision from Perplexity analysis
-            trading_recommendation = parse_perplexity_analysis(perplexity_analysis, symbol)
-            
-            # If we have a trading signal, get confirmation from Perplexity
-            if trading_recommendation.get("recommendation", {}).get("action") != "NONE":
-                # Get confirmation from Perplexity
-                confirmation = await get_perplexity_confirmation(symbol, trading_recommendation["recommendation"]["action"])
-                trading_recommendation["confirmation"] = confirmation
-                
-                if confirmation:
-                    logger.info(f"Perplexity confirmed the {trading_recommendation['recommendation']['action']} signal for {symbol}")
-                else:
-                    logger.info(f"Perplexity rejected the {trading_recommendation['recommendation']['action']} signal for {symbol}")
-                    # Reset action to NONE if not confirmed
-                    trading_recommendation["recommendation"]["action"] = "NONE"
-                    trading_recommendation["recommendation"]["confidence"] = 0
-            
-            return trading_recommendation
-                
-        except Exception as e:
-            logger.error(f"Error analyzing TradingView chart: {e}", exc_info=True)
-            return None
-
-async def get_perplexity_confirmation(symbol: str, position_type: str) -> bool:
-    """Get trade confirmation from Perplexity API."""
-    # Get API key from environment
-    api_key = os.environ.get("PERPLEXITY_API_KEY")
-    if not api_key:
-        logger.error("Perplexity API key not found in environment variables")
-        return False
-    
-    prompt = f"Would you recommend a {position_type} trade on {symbol} based on current market conditions? Answer with YES or NO at the beginning of your response, followed by your reasoning."
-    
-    # Construct request payload
-    payload = {
-        "model": "sonar-pro",
-        "messages": [
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ],
-        "max_tokens": 500
-    }
-    
-    # Setup headers
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json"
-    }
-    
-    try:
-        # Query Perplexity API
-        response = requests.post("https://api.perplexity.ai/chat/completions", json=payload, headers=headers)
-        
-        if response.status_code != 200:
-            logger.error(f"Error from Perplexity API: {response.status_code} - {response.text}")
-            return False
-            
-        result = response.json()
-        
-        # Extract the response text
-        response_text = result.get("choices", [{}])[0].get("message", {}).get("content", "").lower()
-        
-        # Check if response is affirmative
-        is_confirmed = response_text.startswith("yes")
-        logger.info(f"Perplexity confirmation for {position_type} on {symbol}: {'YES' if is_confirmed else 'NO'}")
-        
-        return is_confirmed
-        
-    except Exception as e:
-        logger.error(f"Error getting Perplexity confirmation: {e}")
-        return False
-
-async def manage_trade(position: Dict, chart_data: Dict):
-    """Manage an existing trade based on chart analysis"""
-    try:
-        position_id = position.get("id")
-        position_type = position.get("type")  # LONG or SHORT
-        
-        # Get confirmation from Perplexity
-        close_confirmed = await get_perplexity_confirmation(
-            symbol=position.get("symbol"),
-            position_type=position_type
-        )
-        
-        if close_confirmed:
-            # Close position
-            global client
-            if client is None:
-                client = MockBluefinClient()  # Fallback to mock client
-                
-            try:
-                if hasattr(client, "close_position"):
-                    await client.close_position(position["id"])
-                else:
-                    # Fallback for clients without close_position method
-                    logger.warning(f"No close_position method available, using simulation for {position['id']}")
-                    await asyncio.sleep(1)  # Simulate API call delay
-            except Exception as e:
-                logger.error(f"Error closing position: {e}")
-            
-            # Open opposite position
-            new_side = opposite_type(position_type)
-            await open_position(position.get("symbol"), new_side, position.get("size", 0.1))
-    except Exception as e:
-        logger.error(f"Error managing trade: {e}")
-
-async def open_position(symbol: str, side: str, size: float) -> Dict:
-    """Open a new position on the exchange"""
-    
-    # Default parameters
-    params = {
-        "position_size_pct": float(os.getenv("DEFAULT_POSITION_SIZE_PCT", "0.05"))
-    }
-    
-    # Calculate position size
-    global client
-    if client is None:
-        client = MockBluefinClient()  # Fallback to mock client
-    
-    try:
-        # Get account equity
-        equity = 0
-        try:
-            if hasattr(client, "get_account_equity"):
-                equity = await client.get_account_equity()
-            else:
-                # Fallback for clients without get_account_equity method
-                equity = 10000.0  # Default fallback value
-                logger.warning("No get_account_equity method available, using default equity value")
-        except Exception as e:
-            logger.error(f"Error getting account equity: {e}")
-            equity = 10000.0  # Default fallback value
-        
-        position_size = params["position_size_pct"] * equity
-        
-        # Open position
-        try:
-            # Try to create order with appropriate method
-            if hasattr(client, "create_order"):
-                order = await client.create_order(
-                    symbol=symbol,
-                    side=side,
-                    size=position_size
-                )
-            elif hasattr(client, "place_order"):
-                order = await client.place_order(
-                    symbol=symbol,
-                    side=side,
-                    size=position_size
-                )
-            else:
-                # Mock fallback
-                order = {
-                    "id": f"order_{get_timestamp()}",
-                    "symbol": symbol,
-                    "side": side,
-                    "size": position_size,
-                    "status": "created"
-                }
-                logger.warning("Using fallback mock order creation")
-            
-            return order
-        except Exception as e:
-            logger.error(f"Error creating order: {e}")
-            # Return mock order on failure
-            return {
-                "id": f"mock_{get_timestamp()}",
-                "symbol": symbol,
-                "side": side,
-                "size": position_size,
-                "status": "error",
-                "error": str(e)
-            }
-    except Exception as e:
-        logger.error(f"Error opening position: {e}")
-        raise
-
-# Initialize Claude client
-try:
-    claude_client = Client(
-        api_key=CLAUDE_CONFIG["api_key"],
-        max_retries=3  # Increased from default 2 to handle rate limits better
-    )
-    logger.info("Initialized Claude client with config from config.py")
-except ImportError:
-    # Fallback to environment variables
-    claude_client = Client(api_key=os.environ["ANTHROPIC_API_KEY"], max_retries=3)
-    logger.info("Initialized Claude client from environment variables")
-except Exception as e:
-    logger.error(f"Failed to initialize Claude client: {e}")
-    claude_client = None
-
-def init_clients():
-    """Initialize API clients for the trading agent"""
-    global bluefin_client, claude_client
-    
-    try:
-        # Initialize Bluefin client
-        logger.info("Initializing Bluefin client")
-        init_bluefin_client()
-        
-        # NOTE: Claude initialization is disabled temporarily, but kept for future use
-        # Initialize Claude client
-        logger.info("Initializing Claude client")
-        if os.environ.get("ENABLE_CLAUDE", "false").lower() == "true":
-            init_claude_client()
-        else:
-            logger.info("Claude API is disabled, skipping initialization")
-            claude_client = None
-    
-    except Exception as e:
-        logger.error(f"Error initializing clients: {e}", exc_info=True)
-        if not bluefin_client:
-            logger.warning("Failed to initialize Bluefin client")
-        if not claude_client:
-            logger.warning("Failed to initialize Claude client")
-
-def init_bluefin_client():
-    """Initialize the Bluefin client using environment variables"""
-    global bluefin_client
-    
-    try:
-        # Check for API key in environment variables
-        if "BLUEFIN_API_KEY" in os.environ and "BLUEFIN_API_SECRET" in os.environ:
-            api_key = os.environ["BLUEFIN_API_KEY"]
-            api_secret = os.environ["BLUEFIN_API_SECRET"]
-            bluefin_client = BluefinClient(api_key, api_secret)
-        else:
-            logger.warning("Bluefin API credentials not found in environment variables")
-            bluefin_client = None
-    except Exception as e:
-        logger.error(f"Error initializing Bluefin client: {e}", exc_info=True)
-        bluefin_client = None
-
-def init_claude_client():
-    """Initialize the Claude API client using environment variables"""
-    global claude_client
-    
-    try:
-        # Check for API key in environment variables
-        api_key = os.environ.get("ANTHROPIC_API_KEY")
-        
-        if not api_key or api_key == "your_api_key_here":
-            logger.warning("Claude API key not found or not set in environment variables")
-            claude_client = None
-            return
-        
-        # Initialize Claude client with API key
-        logger.info("Initializing Claude client with Anthropic API key")
-        claude_client = Client(api_key=api_key)
-        
-        # Log Claude rate limits from environment (for monitoring)
-        requests_per_minute = os.environ.get("CLAUDE_REQUESTS_PER_MINUTE", 50)
-        input_tokens_per_minute = os.environ.get("CLAUDE_INPUT_TOKENS_PER_MINUTE", 20000)
-        output_tokens_per_minute = os.environ.get("CLAUDE_OUTPUT_TOKENS_PER_MINUTE", 8000)
-        
-        logger.info(f"Claude API rate limits: {requests_per_minute} requests/min, " 
-                    f"{input_tokens_per_minute} input tokens/min, "
-                    f"{output_tokens_per_minute} output tokens/min")
-    except Exception as e:
-        logger.error(f"Failed to initialize Claude client: {e}", exc_info=True)
-        claude_client = None
-
-def test_claude_api():
-    """Test the Claude API connection and functionality"""
-    try:
-        # Get API key from environment
-        api_key = os.getenv("ANTHROPIC_API_KEY")
-        if not api_key:
-            logger.error("ANTHROPIC_API_KEY not found in environment variables")
-            return False
-            
-        client = Client(api_key=api_key)
-        response = client.messages.create(
-            model="claude-3-haiku-20240307",
-            max_tokens=300,
-            messages=[
-                {"role": "user", "content": "Hello Claude! Please respond with a simple greeting."}
-            ]
-        )
-        
-        # Safely extract response text
-        response_text = ""
-        if response and hasattr(response, "content"):
-            for content_block in response.content:
-                if hasattr(content_block, "text") and content_block.text:
-                    response_text += content_block.text
-                elif isinstance(content_block, dict) and "text" in content_block:
-                    response_text += content_block["text"]
-        
-        logger.info(f"Claude API test successful. Response: {response_text or 'No text in response'}")
-        return True
-    except Exception as e:
-        logger.error(f"Error testing Claude API: {e}", exc_info=True)
-        return False
-
-# Define the FastAPI app
-app = FastAPI(title="Trading Agent API", description="API for the trading agent")
-
-@app.get("/")
-async def root():
-    return {"status": "online", "message": "Trading Agent API is running"}
-
-@app.get("/status")
-async def status():
-    return {
-        "status": "online",
-        "mock_trading": MOCK_TRADING,
-        "timestamp": get_timestamp()
-    }
-
-async def start_api_server():
-    """Start the API server using uvicorn"""
-    try:
-        config = uvicorn.Config(app, host="0.0.0.0", port=5000)
-        server = uvicorn.Server(config)
-        await server.serve()
-    except Exception as e:
-        logger.error(f"Error starting API server: {e}", exc_info=True)
-
-async def main():
-    setup_logging()
-    logger.info("Starting agent...")
-    
-    # Create necessary directories
-    os.makedirs("alerts", exist_ok=True)
-    os.makedirs("logs", exist_ok=True)
-    
-    # Start API server in the background
-    api_task = asyncio.create_task(start_api_server())
-    
-    # Start alert processing loop
-    while True:
-        try:
-            await process_alerts()
-        except Exception as e:
-            logger.error(f"Error processing alerts: {e}")
-        await asyncio.sleep(1)
-
 def capture_chart_screenshot(ticker, timeframe="1D"):
     """Capture a screenshot of the TradingView chart for the given ticker and timeframe"""
+    # Check if Playwright is available
+    if not PLAYWRIGHT_AVAILABLE or sync_playwright is None:
+        logger.error("Playwright is not available. Cannot capture chart screenshot.")
+        return None
+        
     try:
         with sync_playwright() as p:
             # Create screenshots directory if it doesn't exist
@@ -970,7 +594,7 @@ async def analyze_chart_with_claude(screenshot_path, ticker):
     
     if not claude_client:
         logger.error("Claude client not initialized, cannot analyze chart")
-        return None
+        return {"error": "Claude client not initialized"}
         
     try:
         # Load config settings
@@ -985,12 +609,17 @@ async def analyze_chart_with_claude(screenshot_path, ticker):
             model = os.getenv("CLAUDE_MODEL", "claude-3.7-sonnet")
             temperature = float(os.getenv("CLAUDE_TEMPERATURE", 0.2))
         
+        # Check if screenshot exists
+        if not os.path.exists(screenshot_path):
+            logger.error(f"Screenshot not found at {screenshot_path}")
+            return {"error": f"Screenshot not found at {screenshot_path}"}
+            
         # Convert image to base64 for transmission
         with open(screenshot_path, "rb") as image_file:
             encoded_image = base64.b64encode(image_file.read()).decode('utf-8')
         
         # Construct system prompt
-        system_prompt = f"""You are an expert cryptocurrency trader and technical analyst. 
+        system_prompt = f"""You are an expert cryptocurrency trader and technical analyst.
 You are analyzing a trading chart for {ticker} to make trading decisions.
 Analyze the chart thoroughly and provide:
 1. Key technical indicators visible on the chart
@@ -1007,7 +636,7 @@ Format your analysis in a structured way with clear sections."""
         
         # Create message with anthropic.Client - using correct schema
         response = claude_client.messages.create(
-            model="claude-3.7-sonnet",
+            model=model,
             max_tokens=max_tokens,
             temperature=temperature,
             system=system_prompt,
@@ -1032,25 +661,47 @@ Format your analysis in a structured way with clear sections."""
             ]
         )
         
-        # Extract and return results - handling response structure correctly
+        # Extract text from response safely
         analysis_text = ""
-        for content_block in response.content:
-            if content_block.type == "text":
-                analysis_text = content_block.text
-                break
         
+        # Handle different possible response structures
+        try:
+            if hasattr(response, "content"):
+                for content_block in response.content:
+                    # Handle dict-style content
+                    if isinstance(content_block, dict) and "text" in content_block:
+                        analysis_text += content_block["text"]
+                    # Handle object-style content with text attribute
+                    elif hasattr(content_block, "type") and content_block.type == "text":
+                        if hasattr(content_block, "text"):
+                            analysis_text += content_block.text
+                    # Handle string content 
+                    elif isinstance(content_block, str):
+                        analysis_text += content_block
+            elif isinstance(response, dict) and "content" in response:
+                if isinstance(response["content"], list):
+                    for block in response["content"]:
+                        if isinstance(block, dict) and "text" in block:
+                            analysis_text += block["text"]
+                elif isinstance(response["content"], str):
+                    analysis_text = response["content"]
+        except Exception as e:
+            logger.error(f"Error parsing Claude response: {e}")
+            # Fallback to string representation
+            analysis_text = str(response)
+                
+        if not analysis_text:
+            logger.error("No text extracted from Claude response")
+            return {"error": "Failed to extract text from Claude response"}
+            
         # Parse the analysis to extract trading recommendation
-        recommendation = parse_claude_analysis(analysis_text, ticker)
+        trading_analysis = parse_claude_analysis(analysis_text, ticker)
         
-        logger.info(f"Claude analysis completed for {ticker}")
-        return {
-            "raw_analysis": analysis_text,
-            "recommendation": recommendation
-        }
-        
+        return trading_analysis
+            
     except Exception as e:
-        logger.error(f"Error analyzing chart with Claude: {e}", exc_info=True)
-        return None
+        logger.error(f"Error in Claude chart analysis: {str(e)}")
+        return {"error": f"Claude analysis error: {str(e)}"}
 
 def parse_claude_analysis(analysis_text, ticker):
     """
