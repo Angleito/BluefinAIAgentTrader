@@ -26,9 +26,11 @@ services:
     volumes:
       - ./alerts:/app/alerts
       - ./logs:/app/logs
+      - ./screenshots:/app/screenshots
     env_file:
       - .env
     restart: unless-stopped
+    command: ["python", "webhook_server.py"]
 
   agent:
     build: 
@@ -55,8 +57,12 @@ services:
     volumes:
       - ./logs:/app/logs
       - ./alerts:/app/alerts  
+      - ./screenshots:/app/screenshots
+      - ./analysis:/app/analysis
     restart: always
     ports:
       - "5000:5000"  # For the control API
     depends_on:
-      - webhook 
+      - webhook
+    command: ["python", "agent.py"]
+    shm_size: 1gb  # Shared memory for browser automation 
