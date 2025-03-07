@@ -33,6 +33,7 @@ RUN mkdir -p logs alerts screenshots analysis
 
 # Copy only the necessary application code
 COPY core/ ./core/
+COPY api/ ./api/
 COPY *.py ./
 COPY config/ ./config/
 COPY check_services.sh ./
