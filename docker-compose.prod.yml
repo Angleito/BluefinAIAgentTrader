@@ -9,7 +9,6 @@ services:
       - ./frontend/build:/usr/share/nginx/html:ro
     ports:
       - "80:80"
-      - "443:443"
     depends_on:
       - backend
       - websocket
@@ -55,10 +54,7 @@ services:
 
   # WebSocket service
   websocket:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: perplexitytrader-websocket:latest
+    image: perplexitytrader-backend:latest
     volumes:
       - ./logs:/app/logs
       - ./config:/app/config
@@ -75,13 +71,12 @@ services:
       - frontend-network
       - backend-network
     command: ["python", "websocket_server.py"]
+    depends_on:
+      - backend
 
   # Webhook service
   webhook:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: perplexitytrader-webhook:latest
+    image: perplexitytrader-backend:latest
     volumes:
       - ./logs:/app/logs
       - ./alerts:/app/alerts
@@ -94,16 +89,22 @@ services:
     ports:
       - "8000:8000"
     restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health", "||", "exit", "1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     networks:
       - backend-network
+    entrypoint: ["/app/entrypoint.sh"]
     command: ["python", "webhook_server.py"]
+    depends_on:
+      - backend
 
   # Trading agent service
   agent:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: perplexitytrader-agent:latest
+    image: perplexitytrader-backend:latest
     volumes:
       - ./logs:/app/logs
       - ./alerts:/app/alerts
@@ -114,13 +115,22 @@ services:
     environment:
       - FLASK_ENV=production
       - FLASK_DEBUG=false
-      - MOCK_TRADING=${MOCK_TRADING:-False}
+      - MOCK_TRADING=False
+    ports:
+      - "5002:5002"
     restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5002/health", "||", "exit", "1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     depends_on:
       - backend
       - webhook
     networks:
       - backend-network
+    entrypoint: ["/app/entrypoint.sh"]
     command: ["python", "agent.py"]
     shm_size: 1gb
 
