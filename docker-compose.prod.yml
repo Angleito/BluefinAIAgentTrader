@@ -1,6 +1,22 @@
 version: '3.8'
 
 services:
+  # Frontend service
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    environment:
+      - NODE_ENV=production
+    networks:
+      - frontend-network
+    depends_on:
+      - backend
+    command: ["npm", "run", "build"]
+
   # Nginx service for frontend and reverse proxy
   nginx:
     image: nginx:alpine
@@ -10,6 +26,7 @@ services:
     ports:
       - "80:80"
     depends_on:
+      - frontend
       - backend
       - websocket
     restart: always
@@ -81,7 +98,7 @@ services:
       - ./logs:/app/logs
       - ./alerts:/app/alerts
     env_file:
-      - .env.prod
+      - .env
     environment:
       - FLASK_ENV=production
       - FLASK_DEBUG=false
@@ -111,7 +128,7 @@ services:
       - ./config:/app/config
       - ./data:/app/data
     env_file:
-      - .env.prod
+      - .env
     environment:
       - FLASK_ENV=production
       - FLASK_DEBUG=false
@@ -142,12 +159,12 @@ services:
       - "4040:4040"
     environment:
       - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN}
-    command: http webhook:8000
+    command: http nginx:80
     depends_on:
-      - webhook
+      - nginx
     restart: unless-stopped
     networks:
-      - backend-network
+      - frontend-network
     profiles:
       - with-ngrok
 
