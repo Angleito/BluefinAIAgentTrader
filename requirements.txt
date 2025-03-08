@@ -16,3 +16,7 @@ numpy==1.24.3
 
 # Utility
 pillow==10.1.0
+
+# Bluefin Exchange API clients
+git+https://github.com/fireflyprotocol/bluefin-client-python-sui.git
+git+https://github.com/fireflyprotocol/bluefin-v2-client-python.git
