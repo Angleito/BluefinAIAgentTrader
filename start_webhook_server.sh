@@ -142,22 +142,25 @@ start_ngrok() {
 
     echo "Starting ngrok tunnel to port $WEBHOOK_PORT..."
     
-    # Start ngrok with custom domain if provided
+    # Start ngrok with TCP tunnel instead of HTTP
     if [ -n "$NGROK_DOMAIN" ]; then
-        ./ngrok http --domain="$NGROK_DOMAIN" "$WEBHOOK_PORT" > logs/ngrok.log 2>&1 &
+        # For TCP tunnels with custom domain, we need to use a different approach
+        # Note: TCP tunnels with custom domains require a paid ngrok plan
+        ./ngrok tcp --domain="$NGROK_DOMAIN" "$WEBHOOK_PORT" > logs/ngrok.log 2>&1 &
     else
-        ./ngrok http "$WEBHOOK_PORT" > logs/ngrok.log 2>&1 &
+        # Standard TCP tunnel
+        ./ngrok tcp "$WEBHOOK_PORT" > logs/ngrok.log 2>&1 &
     fi
     
     NGROK_PID=$!
-    echo "ngrok started with PID: $NGROK_PID"
+    echo "ngrok TCP tunnel started with PID: $NGROK_PID"
     
     # Wait for ngrok to start
     sleep 2
     
-    # Get ngrok URL
+    # Get ngrok URL - for TCP tunnels, the format is different
     if [ -n "$NGROK_DOMAIN" ]; then
-        NGROK_URL="https://$NGROK_DOMAIN"
+        NGROK_URL="tcp://$NGROK_DOMAIN"
     else
         # Try to get URL from ngrok API
         NGROK_URL=$(curl -s http://localhost:4040/api/tunnels | grep -o '"public_url":"[^"]*' | head -1 | sed 's/"public_url":"//')
