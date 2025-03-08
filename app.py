@@ -13,6 +13,7 @@ from flask_socketio import SocketIO
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from anthropic import Client
+from flask_cors import CORS
 
 # Setup logging
 logging.basicConfig(
@@ -27,6 +28,20 @@ logger = logging.getLogger("webhook_server")
 
 # Initialize Flask app
 app = Flask(__name__)
+
+# Configure static file serving
+if os.path.exists('frontend/dist'):
+    app.static_folder = 'frontend/dist'
+    app.static_url_path = ''
+elif os.path.exists('frontend/build'):
+    app.static_folder = 'frontend/build'
+    app.static_url_path = ''
+elif os.path.exists('static'):
+    app.static_folder = 'static'
+    app.static_url_path = '/static'
+
+# Configure CORS
+CORS(app)
 
 # Initialize Flask-SocketIO
 socketio = SocketIO(app, cors_allowed_origins="*")
@@ -113,19 +128,35 @@ def token_required(f):
 @app.route('/')
 def index():
     """Render the main dashboard page"""
-    # In a full implementation, you'd render an HTML template
-    return jsonify({
-        "status": "PerplexityTrader API running",
-        "endpoints": [
-            "/status - Get current trading status",
-            "/start - Start the trading bot",
-            "/stop - Stop the trading bot",
-            "/configure - Configure trading parameters",
-            "/positions - Get open positions",
-            "/analysis - Get latest analysis result",
-            "/api/process_alert - Process TradingView alerts"
-        ]
-    })
+    try:
+        # Check if we have a frontend directory with an index.html
+        if os.path.exists('frontend/dist/index.html'):
+            return app.send_static_file('index.html')
+        elif os.path.exists('frontend/build/index.html'):
+            return app.send_static_file('index.html')
+        elif os.path.exists('index.html'):
+            with open('index.html', 'r') as f:
+                return f.read()
+        else:
+            # If no frontend is available, return API information
+            return jsonify({
+                "status": "PerplexityTrader API running",
+                "version": os.environ.get("APP_VERSION", "1.0.0"),
+                "environment": os.environ.get("FLASK_ENV", "production"),
+                "endpoints": [
+                    "/status - Get current trading status",
+                    "/start - Start the trading bot",
+                    "/stop - Stop the trading bot",
+                    "/configure - Configure trading parameters",
+                    "/positions - Get open positions",
+                    "/analysis - Get latest analysis result",
+                    "/webhook - Process TradingView alerts",
+                    "/health - Health check endpoint"
+                ]
+            })
+    except Exception as e:
+        logger.error(f"Error serving index: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route('/status', methods=['GET'])
 def get_status():
