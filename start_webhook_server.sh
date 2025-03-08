@@ -110,26 +110,43 @@ NGROK_PID=""
 start_ngrok() {
     if ! command_exists "ngrok"; then
         echo "Error: ngrok is not installed"
-        echo "Please install ngrok from https://ngrok.com/download"
-        return 1
+        echo "Installing ngrok..."
+        
+        # Download and install ngrok if not present
+        if [ ! -f ./ngrok ]; then
+            curl -s https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-stable-linux-amd64.zip -o ngrok.zip
+            unzip -o ngrok.zip
+            chmod +x ./ngrok
+        fi
+        
+        # Add to path
+        export PATH=$PATH:$(pwd)
     fi
 
     # Check if auth token is set
     if [ -z "$NGROK_AUTHTOKEN" ]; then
-        echo "Warning: NGROK_AUTHTOKEN is not set"
-        echo "ngrok may have limited functionality"
+        echo "Error: NGROK_AUTHTOKEN is not set"
+        echo "Please set NGROK_AUTHTOKEN in your .env file or environment"
+        return 1
     else
         # Configure ngrok auth token
-        ngrok config add-authtoken "$NGROK_AUTHTOKEN" >/dev/null 2>&1
+        echo "Configuring ngrok with auth token..."
+        ./ngrok config add-authtoken "$NGROK_AUTHTOKEN" || ngrok config add-authtoken "$NGROK_AUTHTOKEN"
+        
+        if [ $? -ne 0 ]; then
+            echo "Failed to set ngrok authtoken. Trying alternative method..."
+            mkdir -p ~/.ngrok2
+            echo "authtoken: $NGROK_AUTHTOKEN" > ~/.ngrok2/ngrok.yml
+        fi
     fi
 
     echo "Starting ngrok tunnel to port $WEBHOOK_PORT..."
     
     # Start ngrok with custom domain if provided
     if [ -n "$NGROK_DOMAIN" ]; then
-        ngrok http --domain="$NGROK_DOMAIN" "$WEBHOOK_PORT" > logs/ngrok.log 2>&1 &
+        ./ngrok http --domain="$NGROK_DOMAIN" "$WEBHOOK_PORT" > logs/ngrok.log 2>&1 &
     else
-        ngrok http "$WEBHOOK_PORT" > logs/ngrok.log 2>&1 &
+        ./ngrok http "$WEBHOOK_PORT" > logs/ngrok.log 2>&1 &
     fi
     
     NGROK_PID=$!

@@ -261,8 +261,12 @@ def simulate_webhook():
 if __name__ == "__main__":
     # Set up Flask app
     debug_mode = os.getenv("FLASK_DEBUG", "False").lower() in ("true", "1", "t", "yes")
-    port = int(os.getenv("WEBHOOK_PORT", 5002))
+    port = int(os.getenv("WEBHOOK_PORT", 5001))
     host = os.getenv("WEBHOOK_HOST", "0.0.0.0")
+    
+    # Create necessary directories
+    os.makedirs("logs", exist_ok=True)
+    os.makedirs("alerts", exist_ok=True)
     
     # Print startup message
     print("\n==================================================")
@@ -270,7 +274,47 @@ if __name__ == "__main__":
     print("==================================================")
     print(f"Listening on port: {port}")
     print(f"Debug mode: {'Enabled' if debug_mode else 'Disabled'}")
-    print("To use with TradingView alerts, set up ngrok and use the webhook URL in TradingView.")
+    print(f"Environment: {os.getenv('FLASK_ENV', 'development')}")
+    
+    # Check if ngrok is enabled
+    use_ngrok = os.getenv("USE_NGROK", "False").lower() in ("true", "1", "t", "yes")
+    if use_ngrok:
+        try:
+            import subprocess
+            import time
+            import json
+            
+            # Check if ngrok is installed
+            try:
+                # Try to start ngrok
+                ngrok_cmd = ["ngrok", "http", str(port)]
+                
+                # Add domain if specified
+                ngrok_domain = os.getenv("NGROK_DOMAIN", "")
+                if ngrok_domain:
+                    ngrok_cmd.extend(["--domain", ngrok_domain])
+                
+                # Start ngrok in the background
+                subprocess.Popen(ngrok_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                
+                # Wait for ngrok to start
+                time.sleep(3)
+                
+                # Get the public URL from the ngrok API
+                try:
+                    ngrok_api = requests.get("http://localhost:4040/api/tunnels").json()
+                    public_url = ngrok_api["tunnels"][0]["public_url"]
+                    print(f"Ngrok tunnel established: {public_url}")
+                    print(f"Use this URL in your TradingView alerts: {public_url}/webhook")
+                except Exception as e:
+                    print(f"Ngrok started, but couldn't get public URL: {e}")
+                    print("Check http://localhost:4040 for the ngrok dashboard")
+            except Exception as e:
+                print(f"Error starting ngrok: {e}")
+                print("Continuing without ngrok...")
+        except ImportError:
+            print("Ngrok Python package not installed. Continuing without ngrok...")
+    
     print("==================================================\n")
     
     # Start the Flask app

@@ -14,15 +14,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy only the requirements file first to leverage Docker cache
+# Install Flask and Werkzeug with compatible versions first
+RUN pip install --no-cache-dir flask==2.0.1 werkzeug==2.0.3
+
+# Copy requirements.txt but exclude Flask and Werkzeug since we've already installed them
 COPY requirements.txt .
 
-# Install dependencies in a specific order to avoid conflicts
-RUN pip install --no-cache-dir flask==2.0.1 && \
-    pip install --no-cache-dir greenlet==3.0.0 && \
-    pip install --no-cache-dir playwright==1.39.0 && \
-    pip install --no-cache-dir -r requirements.txt && \
-    pip install --no-cache-dir git+https://github.com/fireflyprotocol/bluefin-v2-client-python.git
+# Install other Python dependencies
+RUN grep -v "flask\|werkzeug" requirements.txt > other_requirements.txt && \
+    pip install --no-cache-dir -r other_requirements.txt && \
+    rm other_requirements.txt
+
+# Verify Flask and Werkzeug versions
+RUN pip show flask werkzeug
 
 # Install playwright browsers
 RUN playwright install --with-deps chromium
@@ -54,7 +58,8 @@ ENV PYTHONUNBUFFERED=1 \
     FLASK_ENV=production \
     FLASK_DEBUG=false \
     WEBHOOK_PORT=5001 \
-    MOCK_TRADING=False
+    MOCK_TRADING=False \
+    PYTHONPATH=/app
 
 # Add healthcheck to ensure the application is running properly
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
