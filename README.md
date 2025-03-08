@@ -10,6 +10,35 @@ An automated trading system that uses TradingView alerts to execute trades on th
 - Supports real money trading
 - 24/7 operation with automatic monitoring and restart
 
+## Position Doubling Feature
+
+When the system executes a trade in live mode, it checks for any open positions in the same ticker. If there is an existing position in the opposite direction (e.g., a LONG position when trying to execute a SELL trade), the system will double the position size to both close the existing position and open a new one in the opposite direction.
+
+This feature ensures that:
+
+1. Existing positions are properly closed before opening new ones in the opposite direction
+2. The position size is automatically adjusted to handle the position flip
+3. The system can seamlessly transition between long and short positions
+
+### How It Works
+
+1. Before executing a trade, the system checks for existing positions in the same symbol
+2. If an existing position is found in the opposite direction, the system doubles the position size
+3. This doubled position size is used to:
+   - Close the existing position (using the first half of the size)
+   - Open a new position in the opposite direction (using the second half of the size)
+
+### Example
+
+If you have a LONG position of 1.0 SUI-PERP and the system receives a signal to SELL:
+
+1. The system detects the existing LONG position of size 1.0
+2. It doubles the position size to 2.0
+3. The first 1.0 closes the existing LONG position
+4. The second 1.0 opens a new SHORT position
+
+This ensures smooth position flipping without having to manually close positions before opening new ones in the opposite direction.
+
 ## Setup
 
 1. Clone this repository

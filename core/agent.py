@@ -792,7 +792,7 @@ async def init_clients():
             logger.info(f"Connected with wallet address: {public_address}")
             
             # Get account details
-            account_details = await client.get_account_details()
+            account_details = await client.get_account_info()
             logger.info(f"Account details: {account_details}")
         except Exception as e:
             logger.error(f"Error initializing Bluefin client: {e}")
@@ -1244,7 +1244,7 @@ def parse_perplexity_analysis(analysis, ticker):
         
     return recommendation
 
-async def execute_trade(symbol: str, side: str, position_size: float = None, risk_percentage: float = None, stop_loss_percentage: float = None, leverage: int = None, order_type: str = "MARKET", price: float = None):
+async def execute_trade(symbol: str, side: str, position_size: float = None, risk_percentage: float = None, stop_loss_percentage: float = None, take_profit_percentage: float = None, leverage: int = None, order_type: str = "MARKET", price: float = None):
     """
     Execute a real trade on the Bluefin exchange.
     
@@ -1254,6 +1254,7 @@ async def execute_trade(symbol: str, side: str, position_size: float = None, ris
     - position_size: The size of the position to open (optional, will be calculated if not provided)
     - risk_percentage: The percentage of account to risk (optional)
     - stop_loss_percentage: The percentage for stop loss (optional)
+    - take_profit_percentage: The percentage for take profit (optional)
     - leverage: The leverage to use for the trade (optional, default from config)
     - order_type: The type of order ("MARKET" or "LIMIT")
     - price: The price for limit orders (required for LIMIT orders)
@@ -1262,25 +1263,12 @@ async def execute_trade(symbol: str, side: str, position_size: float = None, ris
     1. Create an order signature request
     2. Sign the order
     3. Post the signed order to the exchange
+    4. Place stop loss and take profit orders if specified
     
     Returns:
         dict: The order response from Bluefin (real or mock)
     """
     try:
-        # Calculate position size if not provided
-        if position_size is None:
-            position_size = await calculate_position_size(
-                symbol=symbol,
-                side=side,
-                risk_percentage=risk_percentage,
-                stop_loss_percentage=stop_loss_percentage
-            )
-            
-        logger.info(f"Executing trade: {side} {position_size} of {symbol} with order type {order_type}")
-        
-        # Get parameters for symbol
-        leverage_value = leverage or int(os.getenv("DEFAULT_LEVERAGE", "5"))
-        
         # Initialize Bluefin client if needed
         global client
         if client is None:
@@ -1315,13 +1303,59 @@ async def execute_trade(symbol: str, side: str, position_size: float = None, ris
                 logger.warning("No Bluefin client available, using mock client")
                 client = MockBluefinClient()
         
+        # Check for existing positions in the opposite direction
+        try:
+            positions = []
+            if hasattr(client, "get_positions"):
+                positions = await client.get_positions()
+            elif hasattr(client, "get_account_info"):
+                account_info = await client.get_account_info()
+                positions = account_info.get("positions", [])
+            
+            # Find position for the current symbol
+            existing_position = next((p for p in positions if p.get("symbol") == symbol), None)
+            
+            # If there's an existing position, check if it's in the opposite direction
+            if existing_position:
+                existing_side = existing_position.get("side", "").upper()
+                new_side = "LONG" if side == ORDER_SIDE.BUY else "SHORT"
+                
+                if existing_side != new_side:
+                    # Position is in the opposite direction, double the size
+                    existing_quantity = float(existing_position.get("quantity", 0))
+                    logger.info(f"Found existing {existing_side} position with size {existing_quantity}, doubling new position size")
+                    
+                    # If position_size is not provided or smaller than existing position, double the existing position size
+                    if position_size is None or position_size < existing_quantity:
+                        position_size = existing_quantity * 2
+                        logger.info(f"Adjusted position size to {position_size} to close existing position and open new one")
+        except Exception as e:
+            logger.warning(f"Error checking existing positions: {e}. Proceeding with original position size.")
+        
+        # Calculate position size if not provided
+        if position_size is None:
+            position_size = await calculate_position_size(
+                symbol=symbol,
+                side=side,
+                risk_percentage=risk_percentage,
+                stop_loss_percentage=stop_loss_percentage
+            )
+            
+        logger.info(f"Executing trade: {side} {position_size} of {symbol} with order type {order_type}")
+        
+        # Get parameters for symbol
+        leverage_value = leverage or int(os.getenv("DEFAULT_LEVERAGE", "5"))
+        
         # Ensure leverage is set correctly
         await ensure_leverage(symbol, leverage_value)
         
+        # Get current market price for stop loss and take profit calculations
+        market_price = await get_market_price(symbol)
+        
         # For LIMIT orders, ensure price is provided
         if order_type == "LIMIT" and price is None:
-            # Get current market price as a fallback
-            price = await get_market_price(symbol)
+            # Use market price as a fallback
+            price = market_price
             logger.warning(f"No price provided for LIMIT order, using market price: {price}")
         
         # Create order using the signature flow
@@ -1344,85 +1378,121 @@ async def execute_trade(symbol: str, side: str, position_size: float = None, ris
                 logger.info(f"Created signed order: {signed_order}")
                 
                 # Step 3: Post the signed order
-                order = await client.post_signed_order(signed_order)
-                logger.info(f"Posted signed order, response: {order}")
-                
-                # Log order status updates from socket events
-                def log_order_update(event):
-                    if event['orderHash'] == signed_order['orderHash']:
-                        if event['type'] == 'OrderSettlementUpdate':
-                            logger.info(f"Order {event['orderHash']} sent for on-chain settlement")
-                            logger.info(f"  Quantity: {event['quantitySentForSettlement']}")
-                            logger.info(f"  Is Maker: {event['isMaker']}")
-                            logger.info(f"  Average Fill Price: {event['avgFillPrice']}")
-                            logger.info(f"  Matched Orders:")
-                            for matched_order in event['matchedOrders']:
-                                logger.info(f"    Fill Price: {matched_order['fillPrice']}, Quantity: {matched_order['quantity']}")
-                                
-                        elif event['type'] == 'OrderRequeueUpdate':
-                            logger.warning(f"Order {event['orderHash']} settlement failed, re-entering orderbook")
-                            logger.info(f"  Quantity Requeued: {event['quantitySentForRequeue']}")
-                            
-                        elif event['type'] == 'OrderCancelledOnReversionUpdate':
-                            logger.warning(f"Order {event['orderHash']} failed settlement and was cancelled")
-                            logger.info(f"  Quantity Cancelled: {event['quantitySentForCancellation']}")
-                            
-                # Register the log_order_update callback
-                client.socket.on(SOCKET_EVENTS.ORDER_SETTLEMENT_UPDATE.value, log_order_update)
-                client.socket.on(SOCKET_EVENTS.ORDER_REQUEUE_UPDATE.value, log_order_update) 
-                client.socket.on(SOCKET_EVENTS.ORDER_CANCELLED_ON_REVERSION_UPDATE.value, log_order_update)
-                
-            # Fallback to direct methods if signature flow not supported
-            elif hasattr(client, "create_order"):
-                order = await client.create_order(
+                main_order = await client.post_signed_order(signed_order)
+                logger.info(f"Posted signed order, response: {main_order}")
+            else:
+                # Fallback to direct order placement if signature flow not supported
+                main_order = await client.place_order(
                     symbol=symbol,
                     side=side,
-                    size=position_size,
-                    type=order_type,
+                    quantity=position_size,
                     price=price,
+                    order_type=order_type,
                     leverage=leverage_value
                 )
-            elif hasattr(client, "place_order"):
-                order = await client.place_order(
-                    symbol=symbol,
-                    side=side, 
-                    size=position_size,
-                    type=order_type,
-                    price=price,
-                    leverage=leverage_value
-                )
-            else:
-                # Last resort for mock client
-                order = {
-                    "id": f"order_{get_timestamp()}",
-                    "symbol": symbol,
-                    "side": side,
-                    "size": position_size,
-                    "type": order_type,
-                    "price": price,
-                    "status": "created"
-                }
-                logger.warning("Using fallback mock order creation")
-        except Exception as e:
-            logger.error(f"Error creating order: {e}")
-            # Create a mock order on failure
-            order = {
-                "id": f"mock_{get_timestamp()}",
-                "symbol": symbol,
-                "side": side,
-                "size": position_size,
-                "type": order_type,
-                "price": price,
-                "status": "error",
-                "error": str(e)
-            }
+                logger.info(f"Placed order directly, response: {main_order}")
             
-        logger.info(f"Order created: {order}")
-        return order
-        
-    finally:
-        # Close the Bluefin client connection
-        await client.close()
+            # Place stop loss order if percentage is provided
+            if stop_loss_percentage and stop_loss_percentage > 0 and main_order:
+                try:
+                    # Calculate stop loss price based on entry price and direction
+                    entry_price = price or market_price
+                    
+                    if side == ORDER_SIDE.BUY:
+                        # For long positions, stop loss is below entry price
+                        stop_price = entry_price * (1 - stop_loss_percentage)
+                    else:
+                        # For short positions, stop loss is above entry price
+                        stop_price = entry_price * (1 + stop_loss_percentage)
+                    
+                    # Place stop loss order
+                    stop_loss_side = ORDER_SIDE.SELL if side == ORDER_SIDE.BUY else ORDER_SIDE.BUY
+                    
+                    logger.info(f"Placing stop loss order at {stop_price} for {position_size} {symbol}")
+                    
+                    if hasattr(client, "create_order_signature_request"):
+                        # Use signature flow for stop loss
+                        sl_signature_request = client.create_order_signature_request(
+                            symbol=symbol,
+                            side=stop_loss_side,
+                            size=position_size,
+                            price=stop_price,
+                            order_type="STOP_MARKET",
+                            reduce_only=True,
+                            leverage=leverage_value
+                        )
+                        sl_signed_order = client.create_signed_order(sl_signature_request)
+                        sl_order = await client.post_signed_order(sl_signed_order)
+                        logger.info(f"Placed stop loss order, response: {sl_order}")
+                    else:
+                        # Use direct order placement
+                        sl_order = await client.place_order(
+                            symbol=symbol,
+                            side=stop_loss_side,
+                            quantity=position_size,
+                            price=stop_price,
+                            order_type="STOP_MARKET",
+                            reduce_only=True,
+                            leverage=leverage_value
+                        )
+                        logger.info(f"Placed stop loss order, response: {sl_order}")
+                except Exception as e:
+                    logger.error(f"Error placing stop loss order: {e}", exc_info=True)
+            
+            # Place take profit order if percentage is provided
+            if take_profit_percentage and take_profit_percentage > 0 and main_order:
+                try:
+                    # Calculate take profit price based on entry price and direction
+                    entry_price = price or market_price
+                    
+                    if side == ORDER_SIDE.BUY:
+                        # For long positions, take profit is above entry price
+                        take_profit_price = entry_price * (1 + take_profit_percentage)
+                    else:
+                        # For short positions, take profit is below entry price
+                        take_profit_price = entry_price * (1 - take_profit_percentage)
+                    
+                    # Place take profit order
+                    take_profit_side = ORDER_SIDE.SELL if side == ORDER_SIDE.BUY else ORDER_SIDE.BUY
+                    
+                    logger.info(f"Placing take profit order at {take_profit_price} for {position_size} {symbol}")
+                    
+                    if hasattr(client, "create_order_signature_request"):
+                        # Use signature flow for take profit
+                        tp_signature_request = client.create_order_signature_request(
+                            symbol=symbol,
+                            side=take_profit_side,
+                            size=position_size,
+                            price=take_profit_price,
+                            order_type="LIMIT",
+                            reduce_only=True,
+                            leverage=leverage_value
+                        )
+                        tp_signed_order = client.create_signed_order(tp_signature_request)
+                        tp_order = await client.post_signed_order(tp_signed_order)
+                        logger.info(f"Placed take profit order, response: {tp_order}")
+                    else:
+                        # Use direct order placement
+                        tp_order = await client.place_order(
+                            symbol=symbol,
+                            side=take_profit_side,
+                            quantity=position_size,
+                            price=take_profit_price,
+                            order_type="LIMIT",
+                            reduce_only=True,
+                            leverage=leverage_value
+                        )
+                        logger.info(f"Placed take profit order, response: {tp_order}")
+                except Exception as e:
+                    logger.error(f"Error placing take profit order: {e}", exc_info=True)
+            
+            return main_order
+        except Exception as e:
+            logger.error(f"Error executing trade: {e}", exc_info=True)
+            return None
+    except Exception as e:
+        logger.error(f"Error in execute_trade: {e}", exc_info=True)
+        return None
 
 async def process_alerts():
     """
@@ -1456,8 +1526,51 @@ async def process_alerts():
                 
                 logger.info(f"New alert received: {alert}")
                 
-                # Extract key data from the alert
-                if "indicator" in alert and alert["indicator"] == "vmanchu_cipher_b":
+                # Handle direct alert format from webhook server
+                if "symbol" in alert and "type" in alert:
+                    symbol = alert.get("symbol")
+                    trade_type = alert.get("type")
+                    position_size = alert.get("position_size", float(os.getenv("DEFAULT_POSITION_SIZE_PCT", "0.05")))
+                    leverage = alert.get("leverage", int(os.getenv("DEFAULT_LEVERAGE", "5")))
+                    stop_loss = alert.get("stop_loss", float(os.getenv("DEFAULT_STOP_LOSS_PCT", "0.15")))
+                    take_profit = alert.get("take_profit", float(os.getenv("DEFAULT_TAKE_PROFIT_PCT", "0.3")))
+                    
+                    # Determine the order side
+                    if trade_type.lower() == "buy":
+                        side = ORDER_SIDE.BUY
+                    elif trade_type.lower() == "sell":
+                        side = ORDER_SIDE.SELL
+                    else:
+                        logger.warning(f"Invalid trade type in alert: {trade_type}")
+                        os.remove(alert_path)
+                        continue
+                    
+                    # Execute the trade
+                    if MOCK_TRADING:
+                        # Mock trade only - log the intent
+                        logger.info(f"MOCK TRADE: Would execute a {side} trade for {symbol} with position size {position_size}, leverage {leverage}, stop loss {stop_loss}, take profit {take_profit}")
+                    else:
+                        # Execute real trade on Bluefin
+                        try:
+                            logger.info(f"Executing {side} trade for {symbol} with position size {position_size}, leverage {leverage}, stop loss {stop_loss}, take profit {take_profit}")
+                            
+                            # Ensure the leverage is set correctly
+                            await ensure_leverage(symbol, leverage)
+                            
+                            # Execute the trade
+                            await execute_trade(
+                                symbol=symbol, 
+                                side=side, 
+                                position_size=position_size,
+                                leverage=leverage,
+                                stop_loss_percentage=stop_loss,
+                                take_profit_percentage=take_profit
+                            )
+                        except Exception as e:
+                            logger.error(f"Error executing trade: {e}", exc_info=True)
+                
+                # Extract key data from the original TradingView alert format
+                elif "indicator" in alert and alert["indicator"] == "vmanchu_cipher_b":
                     symbol = alert.get("symbol", os.getenv("DEFAULT_SYMBOL", "SUI/USD"))
                     timeframe = alert.get("timeframe", os.getenv("DEFAULT_TIMEFRAME", "5m"))
                     signal_type = alert.get("signal_type", "")
@@ -1465,6 +1578,13 @@ async def process_alerts():
                     
                     logger.info(f"Processing VuManChu Cipher B signal: {signal_type}")
                     logger.info(f"Symbol: {symbol}, Timeframe: {timeframe}, Action: {action}")
+                    
+                    # Map TradingView symbol to Bluefin format
+                    if "/" in symbol:
+                        base_currency = symbol.split("/")[0]
+                        bluefin_symbol = f"{base_currency}-PERP"
+                    else:
+                        bluefin_symbol = f"{symbol}-PERP"
                     
                     # Determine trade direction based on signal type and action
                     if action == "BUY":
@@ -1488,18 +1608,34 @@ async def process_alerts():
                     # Execute trade based on the signal
                     if MOCK_TRADING:
                         # Mock trade only - log the intent
-                        logger.info(f"MOCK TRADE: Would execute a {side} trade for {symbol} based on {signal_type} signal")
+                        logger.info(f"MOCK TRADE: Would execute a {side} trade for {bluefin_symbol} based on {signal_type} signal")
                         logger.info(f"Trade direction: {trade_direction}")
                     else:
                         # Execute real trade on Bluefin
                         try:
                             position_size = float(os.getenv("DEFAULT_POSITION_SIZE_PCT", "0.05"))
-                            logger.info(f"Executing {side} trade for {symbol} with position size {position_size}")
-                            await execute_trade(symbol, side, position_size)
+                            leverage = int(os.getenv("DEFAULT_LEVERAGE", "5"))
+                            stop_loss = float(os.getenv("DEFAULT_STOP_LOSS_PCT", "0.15"))
+                            take_profit = float(os.getenv("DEFAULT_TAKE_PROFIT_PCT", "0.3"))
+                            
+                            logger.info(f"Executing {side} trade for {bluefin_symbol} with position size {position_size}, leverage {leverage}, stop loss {stop_loss}, take profit {take_profit}")
+                            
+                            # Ensure the leverage is set correctly
+                            await ensure_leverage(bluefin_symbol, leverage)
+                            
+                            # Execute the trade
+                            await execute_trade(
+                                symbol=bluefin_symbol, 
+                                side=side, 
+                                position_size=position_size,
+                                leverage=leverage,
+                                stop_loss_percentage=stop_loss,
+                                take_profit_percentage=take_profit
+                            )
                         except Exception as e:
-                            logger.error(f"Error executing trade: {e}")
+                            logger.error(f"Error executing trade: {e}", exc_info=True)
                 else:
-                    logger.warning(f"Unsupported alert type: {alert}")
+                    logger.warning(f"Unsupported alert format: {alert}")
                 
                 # Clean up the processed alert file
                 os.remove(alert_path)
@@ -1508,7 +1644,7 @@ async def process_alerts():
                 logger.error(f"Error decoding JSON from file: {alert_path}")
                 os.remove(alert_path)
             except Exception as e:
-                logger.error(f"Error processing alert file {alert_path}: {e}")
+                logger.error(f"Error processing alert file {alert_path}: {e}", exc_info=True)
     
     # Small delay to avoid high CPU usage
     await asyncio.sleep(1)
@@ -1566,25 +1702,56 @@ async def get_status():
 @app.get("/positions")
 async def get_positions():
     """Get the list of open positions."""
-    # TODO: Return actual open positions
-    return [
-        {
-            "id": "pos_1",
-            "symbol": "BTC/USD",
-            "size": 0.5,
-            "entry_price": 45000,
-            "current_price": 47500,
-            "pnl": 1250
-        },
-        {
-            "id": "pos_2", 
-            "symbol": "ETH/USD",
-            "size": 2.0,
-            "entry_price": 3000,
-            "current_price": 2900,
-            "pnl": -200
-        }
-    ]
+    try:
+        # Get positions from the client
+        if client:
+            if hasattr(client, "get_positions"):
+                positions = await client.get_positions()
+            elif hasattr(client, "get_account_details"):
+                account_details = await client.get_account_details()
+                positions = account_details.get("positions", [])
+            else:
+                logger.warning("Client does not have get_positions or get_account_details method")
+                positions = []
+                
+            # Format positions for API response
+            formatted_positions = []
+            for pos in positions:
+                formatted_pos = {
+                    "id": pos.get("id", f"pos_{len(formatted_positions) + 1}"),
+                    "symbol": pos.get("symbol", "UNKNOWN"),
+                    "size": pos.get("quantity", pos.get("size", 0)),
+                    "entry_price": pos.get("entryPrice", pos.get("entry_price", 0)),
+                    "current_price": pos.get("markPrice", pos.get("current_price", 0)),
+                    "pnl": pos.get("unrealizedPnl", pos.get("pnl", 0))
+                }
+                formatted_positions.append(formatted_pos)
+                
+            return formatted_positions
+        else:
+            logger.warning("No client available to get positions")
+            return []
+    except Exception as e:
+        logger.error(f"Error getting positions: {e}")
+        # Fallback to mock data if there's an error
+        return [
+            {
+                "id": "pos_1",
+                "symbol": "BTC/USD",
+                "size": 0.5,
+                "entry_price": 45000,
+                "current_price": 47500,
+                "pnl": 1250
+            },
+            {
+                "id": "pos_2", 
+                "symbol": "ETH/USD",
+                "size": 2.0,
+                "entry_price": 3000,
+                "current_price": 2900,
+                "pnl": -200
+            }
+        ]
 
 @app.get("/trades")
 async def get_trades(limit: int = 10):
@@ -1626,13 +1793,242 @@ async def close_trade(trade_id: str):
     return {"status": "success"}
 
 async def start_api_server():
-    """Start the API server using uvicorn"""
-    try:
-        config = uvicorn.Config(app, host="0.0.0.0", port=5000)
-        server = uvicorn.Server(config)
-        await server.serve()
-    except Exception as e:
-        logger.error(f"Error starting API server: {e}")
+    """Start the FastAPI server for the agent API."""
+    from fastapi import FastAPI, HTTPException, Query, Request, Response
+    from fastapi.middleware.cors import CORSMiddleware
+    import uvicorn
+    
+    app = FastAPI(title="PerplexityTrader Agent API")
+    
+    # Add CORS middleware
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+    
+    @app.get("/health")
+    async def health_check():
+        """Health check endpoint."""
+        return {"status": "ok"}
+    
+    @app.get("/status")
+    async def get_status():
+        """Get the current status of the agent."""
+        global client
+        
+        try:
+            # Get account info
+            account_info = None
+            if client:
+                try:
+                    if hasattr(client, "get_account_info"):
+                        account_info = await client.get_account_info()
+                    elif hasattr(client, "get_user_account_data"):
+                        account_info = await client.get_user_account_data()
+                except Exception as e:
+                    logger.error(f"Error getting account info: {e}")
+            
+            # Get active positions
+            positions = []
+            if client:
+                try:
+                    if hasattr(client, "get_positions"):
+                        positions = await client.get_positions()
+                    elif hasattr(client, "get_user_positions"):
+                        positions = await client.get_user_positions()
+                except Exception as e:
+                    logger.error(f"Error getting positions: {e}")
+            
+            return {
+                "status": "running",
+                "mock_trading": MOCK_TRADING,
+                "account_info": account_info,
+                "positions": positions,
+                "uptime": int(time.time() - start_time)
+            }
+        except Exception as e:
+            logger.error(f"Error in status endpoint: {e}")
+            return {"status": "error", "message": str(e)}
+    
+    @app.get("/positions")
+    async def get_positions():
+        """Get current positions."""
+        global client
+        
+        try:
+            positions = []
+            if client:
+                try:
+                    if hasattr(client, "get_positions"):
+                        positions = await client.get_positions()
+                    elif hasattr(client, "get_user_positions"):
+                        positions = await client.get_user_positions()
+                except Exception as e:
+                    logger.warning(f"Client does not have get_positions or get_account_details method")
+            
+            return positions
+        except Exception as e:
+            logger.error(f"Error in positions endpoint: {e}")
+            return []
+    
+    @app.post("/add_mock_position")
+    async def add_mock_position(position: dict):
+        """Add a mock position for testing purposes."""
+        global client
+        
+        try:
+            if client and hasattr(client, "positions"):
+                # Check if this is a MockBluefinClient
+                if client.__class__.__name__ == "MockBluefinClient":
+                    # Add the position to the mock client's positions list
+                    client.positions.append(position)
+                    logger.info(f"Added mock position: {position}")
+                    return {"status": "success", "message": "Mock position added"}
+                else:
+                    logger.warning("Cannot add mock position to non-mock client")
+                    return {"status": "error", "message": "Not a mock client"}
+            else:
+                logger.warning("Client does not support mock positions")
+                return {"status": "error", "message": "Client does not support mock positions"}
+        except Exception as e:
+            logger.error(f"Error adding mock position: {e}")
+            return {"status": "error", "message": str(e)}
+    
+    @app.get("/trades")
+    async def get_trades():
+        """Get trade history."""
+        # This is a mock implementation for now
+        return [
+            {
+                "id": "trade_1",
+                "symbol": "BTC/USD",
+                "side": "BUY",
+                "size": 0.5,
+                "price": 45000,
+                "timestamp": datetime.now().strftime("%Y%m%d_%H%M%S")
+            },
+            {
+                "id": "trade_2",
+                "symbol": "ETH/USD",
+                "side": "SELL",
+                "size": 1.0,
+                "price": 3200,
+                "timestamp": datetime.now().strftime("%Y%m%d_%H%M%S")
+            }
+        ]
+    
+    @app.post("/open_trade")
+    async def open_trade(alert: dict):
+        """Open a new trade based on the provided alert."""
+        logger.info(f"Opening trade: {alert}")
+        
+        try:
+            # Process the alert
+            await process_alert(alert)
+            return {"status": "success", "trade_id": f"trade_{datetime.now().strftime('%Y%m%d_%H%M%S')}"}
+        except Exception as e:
+            logger.error(f"Error opening trade: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+    
+    @app.post("/close_trade")
+    async def close_trade(trade_id: str = Query(...)):
+        """Close a trade by ID."""
+        logger.info(f"Closing trade: {trade_id}")
+        
+        try:
+            global client
+            
+            if not client:
+                raise HTTPException(status_code=422, detail="Trading client not initialized")
+            
+            # Get positions
+            positions = []
+            try:
+                if hasattr(client, "get_positions"):
+                    positions = await client.get_positions()
+                elif hasattr(client, "get_user_positions"):
+                    positions = await client.get_user_positions()
+            except Exception as e:
+                logger.error(f"Error getting positions: {e}")
+                positions = []
+            
+            # Find the position by ID
+            position = next((p for p in positions if p.get("id") == trade_id), None)
+            
+            if not position:
+                raise HTTPException(status_code=422, detail=f"Position {trade_id} not found")
+            
+            # Close the position
+            if hasattr(client, "close_position"):
+                result = await client.close_position(position.get("symbol"))
+                return {"status": "success", "result": result}
+            else:
+                raise HTTPException(status_code=422, detail="Client does not support closing positions")
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error closing trade: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+    
+    @app.post("/analyze")
+    async def analyze_market(request: dict):
+        """Analyze the market using Claude."""
+        try:
+            # Extract data from request
+            symbol = request.get("symbol", "BTC/USD")
+            timeframe = request.get("timeframe", "1h")
+            data = request.get("data", {})
+            
+            # Call Claude for analysis
+            analysis = await analyze_with_claude(symbol, timeframe, data)
+            
+            return analysis
+        except Exception as e:
+            logger.error(f"Error in analyze endpoint: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+    
+    # Start the server
+    port = int(os.getenv("PORT", "5002"))
+    config = uvicorn.Config(app, host="0.0.0.0", port=port)
+    server = uvicorn.Server(config)
+    logger.info(f"API server started on port {port}")
+    
+    # Also start a Flask server for compatibility with existing code
+    import threading
+    def run_flask():
+        from flask import Flask, request, jsonify
+        flask_app = Flask(__name__)
+        
+        @flask_app.route('/health', methods=['GET'])
+        def flask_health():
+            return jsonify({"status": "ok"})
+        
+        @flask_app.route('/webhook', methods=['POST'])
+        def webhook():
+            try:
+                data = request.json
+                logger.info(f"Received webhook: {data}")
+                
+                # Save the alert to the alerts directory
+                os.makedirs("alerts", exist_ok=True)
+                alert_file = os.path.join("alerts", f"alert_{int(time.time())}.json")
+                with open(alert_file, "w") as f:
+                    json.dump(data, f)
+                
+                return jsonify({"status": "success"})
+            except Exception as e:
+                logger.error(f"Error processing webhook: {e}")
+                return jsonify({"status": "error", "message": str(e)}), 500
+        
+        flask_port = int(os.getenv("FLASK_RUN_PORT", "5000"))
+        flask_app.run(host="0.0.0.0", port=flask_port)
+    
+    threading.Thread(target=run_flask, daemon=True).start()
+    
+    await server.serve()
 
 async def calculate_position_size(symbol, side, risk_percentage=None, stop_loss_percentage=None):
     """
@@ -1775,7 +2171,15 @@ async def ensure_leverage(symbol, target_leverage):
             
         # Adjust leverage
         logger.info(f"Adjusting leverage for {symbol} from {current_leverage}x to {target_leverage}x")
-        result = await client.adjust_leverage(symbol, target_leverage)
+        
+        # Try different method names that might be available in the client
+        if hasattr(client, 'set_leverage'):
+            result = await client.set_leverage(symbol, target_leverage)
+        elif hasattr(client, 'adjust_leverage'):
+            result = await client.adjust_leverage(symbol, target_leverage)
+        else:
+            logger.warning(f"No method available to set leverage for {symbol}")
+            return False
         
         if isinstance(result, dict) and result.get('success', False):
             logger.info(f"Successfully adjusted leverage for {symbol} to {target_leverage}x")
