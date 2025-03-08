@@ -286,8 +286,8 @@ if __name__ == "__main__":
             
             # Check if ngrok is installed
             try:
-                # Try to start ngrok
-                ngrok_cmd = ["ngrok", "http", str(port)]
+                # Try to start ngrok with TCP tunnel instead of HTTP
+                ngrok_cmd = ["ngrok", "tcp", str(port)]
                 
                 # Add domain if specified
                 ngrok_domain = os.getenv("NGROK_DOMAIN", "")
@@ -304,8 +304,14 @@ if __name__ == "__main__":
                 try:
                     ngrok_api = requests.get("http://localhost:4040/api/tunnels").json()
                     public_url = ngrok_api["tunnels"][0]["public_url"]
-                    print(f"Ngrok tunnel established: {public_url}")
-                    print(f"Use this URL in your TradingView alerts: {public_url}/webhook")
+                    print(f"Ngrok TCP tunnel established: {public_url}")
+                    print(f"Use this address for your TradingView webhooks")
+                    
+                    # For TCP tunnels, we need to provide additional instructions
+                    print("\nIMPORTANT: For TradingView webhooks with TCP tunnels:")
+                    print("1. Use the full TCP address (without any path)")
+                    print("2. In TradingView alert settings, set 'Message format' to 'JSON'")
+                    print("3. Include all required fields in your alert message")
                 except Exception as e:
                     print(f"Ngrok started, but couldn't get public URL: {e}")
                     print("Check http://localhost:4040 for the ngrok dashboard")
