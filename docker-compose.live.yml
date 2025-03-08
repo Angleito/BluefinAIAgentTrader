@@ -5,19 +5,32 @@ services:
     image: nginx:alpine
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./frontend/build:/usr/share/nginx/html:ro
     ports:
       - "8080:80"
     restart: always
+    depends_on:
+      - webhook
+      - agent
+
+  frontend:
+    image: node:18-alpine
+    volumes:
+      - ./frontend:/app
+    working_dir: /app
+    command: sh -c "npm install && npm run build"
+    environment:
+      - NODE_ENV=production
 
   ngrok:
     image: ngrok/ngrok:latest
+    command: http nginx:80
     ports:
       - "4040:4040"
     environment:
       - NGROK_AUTHTOKEN=${NGROK_AUTHTOKEN}
-    command: http webhook:5001
     depends_on:
-      - webhook
+      - nginx
     restart: always
 
   webhook:
@@ -42,7 +55,7 @@ services:
   agent:
     build: 
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.agent
     environment:
       - PERPLEXITY_API_KEY=${PERPLEXITY_API_KEY}
       - PERPLEXITY_API_LIMIT=200
@@ -61,6 +74,7 @@ services:
       - DEFAULT_STOP_LOSS_PCT=${DEFAULT_STOP_LOSS_PCT:-0.15}
       - DEFAULT_MAX_POSITIONS=${DEFAULT_MAX_POSITIONS:-3}
       - MOCK_TRADING=False
+      - PORT=5002
     volumes:
       - ./logs:/app/logs
       - ./alerts:/app/alerts  
@@ -68,13 +82,13 @@ services:
       - ./analysis:/app/analysis
     restart: always
     ports:
-      - "5000:5000"
+      - "5002:5002"
     depends_on:
       - webhook
     command: ["python", "agent.py"]
     shm_size: 1gb
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:5000/status"]
+      test: ["CMD", "curl", "-f", "http://localhost:5002/status"]
       interval: 60s
       timeout: 10s
       retries: 3

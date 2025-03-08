@@ -18,6 +18,12 @@ interface ConfigType {
   };
 }
 
+interface ApiResponse {
+  status: string;
+  message: string;
+  [key: string]: any;
+}
+
 const Configuration: React.FC = () => {
   const [config, setConfig] = useState<ConfigType>({
     TRADING_PARAMS: {},
@@ -27,15 +33,23 @@ const Configuration: React.FC = () => {
 
   useEffect(() => {
     // Fetch current configuration on component mount
-    getConfiguration().then((data: ConfigType) => setConfig(data));
+    getConfiguration().then((response) => {
+      if (response && typeof response === 'object' && 'TRADING_PARAMS' in response) {
+        setConfig(response as ConfigType);
+      }
+    });
   }, []);
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
-    const result = await updateConfiguration(config);
+    const result = await updateConfiguration(config) as ApiResponse;
     alert(result.message);
     // Refetch configuration after successful update
-    getConfiguration().then((data: ConfigType) => setConfig(data));
+    getConfiguration().then((response) => {
+      if (response && typeof response === 'object' && 'TRADING_PARAMS' in response) {
+        setConfig(response as ConfigType);
+      }
+    });
   };
 
   return (
