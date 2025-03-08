@@ -2,9 +2,48 @@ import asyncio
 import logging
 import time
 from datetime import datetime
-from config import TRADING_PARAMS
+from core.config import TRADING_PARAMS
 
 logger = logging.getLogger(__name__)
+
+async def check_existing_positions(client, symbol, side):
+    """
+    Check if there are existing positions for the given symbol with the opposite side.
+    
+    Args:
+        client: The Bluefin client
+        symbol: The trading pair symbol
+        side: The side of the new trade (BUY or SELL)
+        
+    Returns:
+        tuple: (has_opposite_position, position_size, position_details)
+    """
+    logger.info(f"Checking existing positions for {symbol} with opposite side of {side}")
+    
+    try:
+        # Get current positions
+        positions = await client.get_positions()
+        
+        # Determine the opposite side
+        opposite_side = "SELL" if side == "BUY" else "BUY"
+        
+        # Filter positions for the given symbol and opposite side
+        opposite_positions = [
+            p for p in positions 
+            if p["symbol"] == symbol and p["side"] == opposite_side
+        ]
+        
+        if opposite_positions:
+            position = opposite_positions[0]
+            logger.info(f"Found opposite position: {position}")
+            return True, float(position.get("size", 0)), position
+        else:
+            logger.info(f"No opposite positions found for {symbol}")
+            return False, 0.0, None
+            
+    except Exception as e:
+        logger.exception(f"Error checking existing positions: {e}")
+        return False, 0.0, None
 
 async def execute_trade(signal):
     """
@@ -34,9 +73,16 @@ async def execute_trade(signal):
         
         # Get account balance
         account_info = await bluefin_client.get_account_info()
-        available_balance = float(account_info["availableBalance"])
+        available_balance = float(account_info.get("availableMargin", 0))
         
         logger.info(f"Account balance: {available_balance}")
+        
+        # Check for existing opposite positions
+        has_opposite_position, opposite_position_size, _ = await check_existing_positions(
+            bluefin_client, 
+            signal["symbol"], 
+            "BUY" if signal["type"].upper() == "BUY" else "SELL"
+        )
         
         # Calculate position size
         position_size = calculate_actual_position_size(
@@ -45,11 +91,16 @@ async def execute_trade(signal):
             signal["leverage"]
         )
         
+        # Double the position size if there's an opposite position
+        if has_opposite_position and TRADING_PARAMS.get("DOUBLE_SIZE_ON_OPPOSITE_POSITION", False):
+            logger.info(f"Doubling position size due to existing opposite position")
+            position_size *= 2
+        
         # Set leverage for the symbol
         await set_leverage(bluefin_client, signal["symbol"], signal["leverage"])
         
         # Execute the trade
-        if signal["type"] == "buy":
+        if signal["type"].upper() == "BUY":
             trade_result = await open_long_position(
                 bluefin_client,
                 signal["symbol"],
@@ -71,12 +122,13 @@ async def execute_trade(signal):
         
         return {
             "success": True,
-            "trade_id": trade_result["id"],
-            "entry_price": trade_result["price"],
+            "trade_id": trade_result.get("id", ""),
+            "entry_price": float(trade_result.get("price", 0)),
             "position_size": position_size,
             "timestamp": signal["timestamp"],
             "type": signal["type"],
-            "symbol": signal["symbol"]
+            "symbol": signal["symbol"],
+            "doubled_size": has_opposite_position and TRADING_PARAMS.get("DOUBLE_SIZE_ON_OPPOSITE_POSITION", False)
         }
         
     except Exception as e:
@@ -130,28 +182,32 @@ async def open_long_position(client, symbol, size, stop_loss_percentage, take_pr
         take_profit_price = market_price * (1 + take_profit_percentage)
         
         # Open the position
-        position = await client.create_market_order(
+        position = await client.place_order(
             symbol=symbol,
-            side="buy",
+            side="BUY",
             quantity=size,
+            price=None,  # Market order
+            order_type="MARKET",
             reduce_only=False
         )
         
         # Set stop loss
-        await client.create_stop_order(
+        await client.place_order(
             symbol=symbol,
-            side="sell",
+            side="SELL",
             quantity=size,
-            trigger_price=stop_loss_price,
+            price=stop_loss_price,
+            order_type="STOP_MARKET",
             reduce_only=True
         )
         
         # Set take profit
-        await client.create_limit_order(
+        await client.place_order(
             symbol=symbol,
-            side="sell",
+            side="SELL",
             quantity=size,
             price=take_profit_price,
+            order_type="LIMIT",
             reduce_only=True
         )
         
@@ -186,28 +242,32 @@ async def open_short_position(client, symbol, size, stop_loss_percentage, take_p
         take_profit_price = market_price * (1 - take_profit_percentage)
         
         # Open the position
-        position = await client.create_market_order(
+        position = await client.place_order(
             symbol=symbol,
-            side="sell",
+            side="SELL",
             quantity=size,
+            price=None,  # Market order
+            order_type="MARKET",
             reduce_only=False
         )
         
         # Set stop loss
-        await client.create_stop_order(
+        await client.place_order(
             symbol=symbol,
-            side="buy",
+            side="BUY",
             quantity=size,
-            trigger_price=stop_loss_price,
+            price=stop_loss_price,
+            order_type="STOP_MARKET",
             reduce_only=True
         )
         
         # Set take profit
-        await client.create_limit_order(
+        await client.place_order(
             symbol=symbol,
-            side="buy",
+            side="BUY",
             quantity=size,
             price=take_profit_price,
+            order_type="LIMIT",
             reduce_only=True
         )
         
@@ -219,7 +279,7 @@ async def open_short_position(client, symbol, size, stop_loss_percentage, take_p
 
 async def get_market_price(client, symbol):
     """
-    Get the current market price for a trading pair.
+    Get the current market price for a symbol.
     
     Args:
         client: The Bluefin client
@@ -229,11 +289,14 @@ async def get_market_price(client, symbol):
         float: The current market price
     """
     try:
-        ticker = await client.get_ticker(symbol)
-        return float(ticker["last_price"])
+        # Get market price using the client's method
+        market_price = await client.get_market_price(symbol)
+        
+        logger.info(f"Current market price for {symbol}: {market_price}")
+        return market_price
     except Exception as e:
         logger.exception(f"Error getting market price: {e}")
-        raise
+        return 0.0
 
 def calculate_actual_position_size(balance, position_size_percentage, leverage):
     """
