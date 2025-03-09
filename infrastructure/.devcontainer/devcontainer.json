@@ -1,0 +1,27 @@
+{
+    "name": "My AI-Ready Container",
+    "image": "mcr.microsoft.com/devcontainers/python:3.11-bullseye",
+    "features": {
+      "ghcr.io/devcontainers/features/docker-in-docker:2": {}
+    },
+    "mounts": [
+      "source=${localWorkspaceFolder},target=/workspace,type=bind"
+    ],
+    "postCreateCommand": "pip install -r requirements.txt",
+    "customizations": {
+      "vscode": {
+        "extensions": ["Cursor.cursor"],
+          
+        "name": "Sudo-Enabled Container",
+        "build": {
+          "dockerfile": "Dockerfile"
+        },
+        "remoteUser": "devuser",
+        "features": {
+          "ghcr.io/devcontainers/features/docker-in-docker:2": {}
+        }
+      }
+    }
+  }
+
+  

@@ -1,0 +1,154 @@
+version: '3.8'
+
+services:
+  # Nginx service for reverse proxy
+  nginx:
+    image: nginx:alpine
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    ports:
+      - "${NGINX_PORT:-80}:80"
+    depends_on:
+      - webhook
+      - agent
+      - websocket
+    restart: always
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - perplexity-network
+
+  # WebSocket service
+  websocket:
+    build:
+      context: ..
+      dockerfile: Docker/Dockerfile
+    image: perplexitytrader-websocket:latest
+    volumes:
+      - ../logs:/app/logs
+      - ../core:/app/core
+    env_file:
+      - ./.env
+    environment:
+      - SOCKET_PORT=${SOCKET_PORT:-5008}
+      - WEBSOCKET_PATH=${WEBSOCKET_PATH:-/socket.io}
+    ports:
+      - "${SOCKET_PORT:-5008}:${SOCKET_PORT:-5008}"
+    restart: always
+    networks:
+      - perplexity-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:${SOCKET_PORT:-5008}/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    command: ["websocket_server.py"]
+
+  # Webhook service
+  webhook:
+    build:
+      context: ..
+      dockerfile: Docker/Dockerfile
+    image: perplexitytrader-webhook:latest
+    volumes:
+      - ../alerts:/app/alerts
+      - ../logs:/app/logs
+      - ../core:/app/core
+    env_file:
+      - ./.env
+    environment:
+      - WEBHOOK_PORT=${WEBHOOK_PORT:-5004}
+      - WEBHOOK_HOST=${WEBHOOK_HOST:-0.0.0.0}
+      - USE_HOOKDECK=${USE_HOOKDECK:-true}
+      - HOOKDECK_API_KEY=${HOOKDECK_API_KEY}
+      - HOOKDECK_SIGNING_SECRET=${HOOKDECK_SIGNING_SECRET}
+      - HOOKDECK_SOURCE_NAME=${HOOKDECK_SOURCE_NAME:-TradingView}
+      - AGENT_API_URL=${AGENT_API_URL}
+    ports:
+      - "${WEBHOOK_PORT:-5004}:${WEBHOOK_PORT:-5004}"
+    restart: always
+    networks:
+      - perplexity-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:${WEBHOOK_PORT:-5004}/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    command: ["webhook_server.py"]
+
+  # Trading agent service
+  agent:
+    build:
+      context: ..
+      dockerfile: Docker/Dockerfile.agent
+    image: perplexitytrader-agent:latest
+    volumes:
+      - ../logs:/app/logs
+      - ../alerts:/app/alerts
+      - ../core:/app/core
+      - ../analysis:/app/analysis
+    env_file:
+      - ./.env
+    environment:
+      - FLASK_APP_PORT=${FLASK_APP_PORT:-5003}
+      - BLUEFIN_NETWORK=${BLUEFIN_NETWORK:-SUI_PROD}
+      - MOCK_TRADING=${MOCK_TRADING:-false}
+    ports:
+      - "${FLASK_APP_PORT:-5003}:${FLASK_APP_PORT:-5003}"
+    restart: always
+    networks:
+      - perplexity-network
+    depends_on:
+      - webhook
+      - websocket
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:${FLASK_APP_PORT:-5003}/health"]
+      interval: 60s
+      timeout: 15s
+      retries: 3
+      start_period: 30s
+    command: ["app.py"]
+    shm_size: 2gb
+
+  # Hookdeck integration (optional)
+  hookdeck:
+    image: hookdeck/hookdeck:latest
+    env_file:
+      - ./.env
+    environment:
+      - HOOKDECK_CLI_KEY=${HOOKDECK_API_KEY}
+      - HOOKDECK_CLI_CONNECT=${HOOKDECK_DESTINATION_URL:-http://webhook:${WEBHOOK_PORT:-5004}}
+      - HOOKDECK_CLI_SOURCE=${HOOKDECK_SOURCE_NAME:-TradingView}
+    depends_on:
+      - webhook
+    networks:
+      - perplexity-network
+    restart: always
+    profiles:
+      - with-hookdeck
+
+  # Watchtower for automatic updates
+  watchtower:
+    image: containrrr/watchtower
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: --interval 86400 --cleanup
+    restart: always
+    networks:
+      - perplexity-network
+
+networks:
+  perplexity-network:
+    driver: bridge
+
+volumes:
+  logs:
+  config:
+  data:
+  alerts: 

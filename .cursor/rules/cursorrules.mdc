@@ -1,8 +1,28 @@
 ---
 description: A guide for cursor to follow when developing this project
-globs: .py .json .env .toml 
+globs: .py .json .env .toml
 alwaysApply: false
 ---
+"Never hardcode secrets in Dockerfiles. 
+Use --env-file with .env.production for runtime configurations.
+Validate Docker socket permissions before agent-initiated builds."
+
+
+"All code execution must assume Docker runtime context. 
+Use docker-compose for multi-service interactions.
+Prefer bind mounts over COPY in Dockerfiles for local development."
+
+# Docker Context Rules
+[docker]
+RULE: All Dockerfiles must use multi-stage builds
+RULE: Never expose port 22 in Docker images
+RULE: Always include HEALTHCHECK instructions
+RULE: Use --no-cache in package manager commands
+
+# Security Rules
+[security]
+RULE: Never write secrets in Dockerfiles - use env variables
+RULE: Validate image hashes with cosign
 
 
 

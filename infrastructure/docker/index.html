@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PerplexityTrader</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 0;
+            color: #333;
+            background-color: #f4f7f9;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        header {
+            background-color: #2c3e50;
+            color: white;
+            padding: 20px 0;
+            text-align: center;
+        }
+        h1 {
+            margin: 0;
+            font-size: 2.5em;
+        }
+        .tagline {
+            font-style: italic;
+            margin-top: 10px;
+        }
+        .content {
+            background-color: white;
+            padding: 30px;
+            margin-top: 20px;
+            border-radius: 5px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        .status {
+            background-color: #e7f4e4;
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 20px;
+        }
+        .status h2 {
+            margin-top: 0;
+            color: #2c3e50;
+        }
+        .status-indicator {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        .status-active {
+            background-color: #2ecc71;
+        }
+        .status-inactive {
+            background-color: #e74c3c;
+        }
+        .status-initializing {
+            background-color: #f39c12;
+        }
+        footer {
+            text-align: center;
+            margin-top: 40px;
+            padding: 20px 0;
+            color: #7f8c8d;
+            font-size: 0.9em;
+        }
+        .actions {
+            margin-top: 30px;
+            padding: 15px;
+            background-color: #f4f7f9;
+            border-radius: 5px;
+        }
+        .button {
+            display: inline-block;
+            background-color: #3498db;
+            color: white;
+            padding: 10px 15px;
+            border-radius: 3px;
+            text-decoration: none;
+            margin-right: 10px;
+            margin-bottom: 10px;
+            cursor: pointer;
+        }
+        .button:hover {
+            background-color: #2980b9;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="container">
+            <h1>PerplexityTrader</h1>
+            <p class="tagline">AI-Powered Crypto Trading Platform</p>
+        </div>
+    </header>
+    
+    <div class="container">
+        <div class="content">
+            <h2>Welcome to PerplexityTrader</h2>
+            <p>
+                PerplexityTrader is an advanced AI-powered trading platform that combines the analytical capabilities of Claude and Perplexity AI to make informed trading decisions in the cryptocurrency market.
+            </p>
+            <p>
+                Our system analyzes market data, identifies patterns, and executes trades with precision, all while managing risk effectively.
+            </p>
+        </div>
+        
+        <div class="status">
+            <h2>System Status</h2>
+            <p id="nginx-status"><span class="status-indicator status-initializing"></span> Web Server: Checking...</p>
+            <p id="agent-status"><span class="status-indicator status-initializing"></span> Trading Agent: Checking...</p>
+            <p id="webhook-status"><span class="status-indicator status-initializing"></span> Webhook Service: Checking...</p>
+            <p id="websocket-status"><span class="status-indicator status-initializing"></span> WebSocket Service: Checking...</p>
+        </div>
+
+        <div class="actions">
+            <h2>Quick Actions</h2>
+            <a href="/agent/status" class="button" target="_blank">Check Agent Details</a>
+            <a href="/webhook/status" class="button" target="_blank">Check Webhook Details</a>
+            <a href="/websocket/status" class="button" target="_blank">Check WebSocket Details</a>
+        </div>
+    </div>
+    
+    <footer>
+        <div class="container">
+            <p>&copy; 2025 PerplexityTrader. All rights reserved.</p>
+        </div>
+    </footer>
+
+    <script>
+        // Function to update the status indicator
+        function updateStatusIndicator(elementId, isActive, statusText) {
+            const element = document.getElementById(elementId);
+            if (element) {
+                const indicator = element.querySelector('.status-indicator');
+                
+                if (isActive) {
+                    indicator.className = 'status-indicator status-active';
+                    element.innerHTML = `<span class="status-indicator status-active"></span> ${statusText}: Active`;
+                } else {
+                    indicator.className = 'status-indicator status-inactive';
+                    element.innerHTML = `<span class="status-indicator status-inactive"></span> ${statusText}: Inactive`;
+                }
+            }
+        }
+
+        // Function to check service status
+        async function checkServiceStatus(url, elementId, serviceName) {
+            try {
+                const response = await fetch(url);
+                updateStatusIndicator(elementId, response.status === 200, serviceName);
+            } catch (error) {
+                updateStatusIndicator(elementId, false, serviceName);
+                console.error(`Error checking ${serviceName} status:`, error);
+            }
+        }
+
+        // Check all services when the page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            // Check nginx status
+            checkServiceStatus('/health', 'nginx-status', 'Web Server');
+            
+            // Check agent status
+            checkServiceStatus('/agent/status', 'agent-status', 'Trading Agent');
+            
+            // Check webhook status
+            checkServiceStatus('/webhook/status', 'webhook-status', 'Webhook Service');
+            
+            // Check websocket status
+            checkServiceStatus('/websocket/status', 'websocket-status', 'WebSocket Service');
+            
+            // Refresh statuses every 30 seconds
+            setInterval(() => {
+                checkServiceStatus('/health', 'nginx-status', 'Web Server');
+                checkServiceStatus('/agent/status', 'agent-status', 'Trading Agent');
+                checkServiceStatus('/webhook/status', 'webhook-status', 'Webhook Service');
+                checkServiceStatus('/websocket/status', 'websocket-status', 'WebSocket Service');
+            }, 30000);
+        });
+    </script>
+</body>
+</html>
