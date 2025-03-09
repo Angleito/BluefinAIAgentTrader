@@ -240,7 +240,7 @@ The BluefinAIAgentTrader follows a sophisticated workflow for making and executi
 
 3. **Order Preparation**:
    - The agent constructs order parameters including:
-     - Symbol/market pair (e.g., BTC-USDT)
+     - Symbol/market pair (e.g., SUI-PERP)
      - Order type (limit, market, stop, etc.)
      - Direction (buy/sell)
      - Quantity (in base or quote currency)
