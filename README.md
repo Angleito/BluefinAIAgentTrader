@@ -1,12 +1,12 @@
-# PerplexityTrader
+# BluefinAIAgentTrader
 
-PerplexityTrader is an AI-powered cryptocurrency trading platform that leverages advanced AI models and real-time market data to make intelligent trading decisions. The system combines webhook integrations, websocket communication, and AI analysis to provide a comprehensive trading solution.
+BluefinAIAgentTrader is an AI-powered cryptocurrency trading platform that leverages advanced AI models and real-time market data to make intelligent trading decisions. The system combines webhook integrations, websocket communication, and AI analysis to provide a comprehensive trading solution for the Bluefin Exchange.
 
 This project was developed with the assistance of [Cursor](https://cursor.sh/), an AI-powered code editor.
 
 ## System Overview
 
-PerplexityTrader consists of several interconnected components:
+BluefinAIAgentTrader consists of several interconnected components:
 
 1. **Webhook Service**: Receives external alerts and trading signals (e.g., from TradingView)
 2. **WebSocket Service**: Provides real-time updates to the user interface
@@ -16,7 +16,7 @@ PerplexityTrader consists of several interconnected components:
 ## Project Structure
 
 ```
-perplexitytrader/
+BluefinAIAgentTrader/
 ├── api/                         # API implementations
 ├── bluefin_env/                 # Bluefin Exchange integration
 ├── config/                      # Configuration files
@@ -59,8 +59,8 @@ perplexitytrader/
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/Angleito/perplextrader.git
-   cd perplextrader
+   git clone https://github.com/Angleito/BluefinAIAgentTrader.git
+   cd BluefinAIAgentTrader
    ```
 
 2. Copy the example environment file and configure:
@@ -139,7 +139,7 @@ Key configuration options are controlled through environment variables in the `.
 
 ## AI Models and Integrations
 
-PerplexityTrader leverages several powerful AI models and integrations:
+BluefinAIAgentTrader leverages several powerful AI models and integrations:
 
 - **Claude by Anthropic**: Powers advanced market analysis and decision-making
 - **Perplexity AI**: Provides research capabilities and market insights
@@ -209,7 +209,7 @@ Special thanks to:
 
 ## Agent Trading Workflow
 
-The PerplexityTrader's AI agent follows a sophisticated workflow for making and executing trading decisions on Bluefin Exchange. Below is a detailed explanation of the entire process from signal reception to trade execution and monitoring.
+The BluefinAIAgentTrader's AI agent follows a sophisticated workflow for making and executing trading decisions on Bluefin Exchange. Below is a detailed explanation of the entire process from signal reception to trade execution and monitoring.
 
 ### Signal Reception and Processing
 
@@ -363,7 +363,7 @@ The PerplexityTrader's AI agent follows a sophisticated workflow for making and 
 ## Infrastructure Setup
 
 ```
-perplexitytrader/
+BluefinAIAgentTrader/
 ├── api/                         # API implementations
 ├── bluefin_env/                 # Bluefin Exchange integration
 ├── config/                      # Configuration files
