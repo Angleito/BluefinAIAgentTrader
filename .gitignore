@@ -225,4 +225,23 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 
-/browser-use 
+./browser-use
+./.github
+./.vscode
+
+.gitignore
+ .dockerignore
+.cursorignore
+node_modules
+
+# Files and directories that should be kept local
+ai-trading-agent/
+.vscode/
+.github/
+.cursor/
+browser-use/
+.cursoreignore
+.cursorrules.md
+.dockerignore
+security_checker.sh
+

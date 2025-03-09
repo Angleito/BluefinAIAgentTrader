@@ -2,6 +2,8 @@
 
 PerplexityTrader is an AI-powered cryptocurrency trading platform that leverages advanced AI models and real-time market data to make intelligent trading decisions. The system combines webhook integrations, websocket communication, and AI analysis to provide a comprehensive trading solution.
 
+This project was developed with the assistance of [Cursor](https://cursor.sh/), an AI-powered code editor.
+
 ## System Overview
 
 PerplexityTrader consists of several interconnected components:
