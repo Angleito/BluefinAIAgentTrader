@@ -1,21 +1,25 @@
 # API clients
-anthropic==0.49.0
+anthropic==0.21.3
 
 # Web and networking
-flask==2.0.1
-gunicorn==20.1.0
+flask==2.3.3
+werkzeug==3.0.1
+gunicorn==21.2.0
 fastapi==0.104.1
 uvicorn==0.23.2
 requests==2.28.2
 backoff==2.2.1
-python-dotenv==0.19.2
+python-dotenv==1.0.0
+flask-cors==4.0.0
+flask-socketio==5.3.6
+flask-limiter==3.5.0
 
 # Data processing
 python-dateutil==2.8.2
-numpy==1.24.3
+numpy==1.26.2
 
 # Utility
-pillow==10.1.0
+pillow==10.2.0
 
 # Bluefin Exchange API clients
 git+https://github.com/fireflyprotocol/bluefin-client-python-sui.git
