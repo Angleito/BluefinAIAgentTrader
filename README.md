@@ -17,7 +17,13 @@ PerplexityTrader consists of several interconnected components:
 
 ```
 perplexitytrader/
-├── infrastructure/
+├── api/                         # API implementations
+├── bluefin_env/                 # Bluefin Exchange integration
+├── config/                      # Configuration files
+├── core/                        # Core trading logic and strategies
+├── examples/                    # Example scripts and configurations
+├── frontend/                    # Web UI components and assets
+├── infrastructure/              # Infrastructure configurations
 │   └── docker/                  # All Docker configuration and services
 │       ├── docker-compose.yml            # Main Docker Compose configuration
 │       ├── docker-compose.simple.yml     # Simplified Docker Compose for easier startup
@@ -34,16 +40,11 @@ perplexitytrader/
 │       ├── healthcheck.sh                # Health check script for containers
 │       ├── check_services_docker.sh      # Service monitoring script
 │       └── nginx.conf                    # Nginx web server configuration
-├── core/                        # Core trading logic and strategies
-├── api/                         # API implementations
-├── bluefin_env/                 # Bluefin Exchange integration
-├── frontend/                    # Web UI components and assets
-├── src/                         # Source code for main application
-├── alerts/                      # Alert configurations and history
 ├── logs/                        # System logs
-├── security_checker.sh          # Security scanning script
-├── .env                         # Environment variables (copy from .env.example)
+├── src/                         # Source code for main application
+├── test/                        # Test files and test configurations
 ├── .env.example                 # Example environment variables file
+├── .gitignore                   # Git ignore rules
 └── README.md                    # This documentation file
 ```
 
