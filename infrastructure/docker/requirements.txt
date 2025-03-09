@@ -3,10 +3,10 @@ anthropic==0.18.1
 
 # Web and networking
 flask==2.3.3
-werkzeug==2.3.7
+werkzeug==3.0.1
 gunicorn==21.2.0
-fastapi==0.104.1
-uvicorn==0.23.2
+fastapi==0.110.0
+uvicorn==0.27.1
 requests==2.31.0
 backoff==2.2.1
 python-dotenv==1.0.0
@@ -28,3 +28,7 @@ git+https://github.com/fireflyprotocol/bluefin-v2-client-python.git
 # New dependencies
 httpx==0.26.0
 websockets==12.0
+
+# Security libraries
+pyjwt==2.8.0
+cryptography==42.0.0

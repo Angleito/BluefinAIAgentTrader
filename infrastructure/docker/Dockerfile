@@ -1,36 +1,42 @@
 # Use Python 3.10 as the base image
-FROM python:3.10-slim
+FROM python:3.10-slim-bullseye
 
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies
+# Add non-root user for security
+RUN groupadd -r appuser && useradd -r -g appuser -d /app appuser \
+    && chown -R appuser:appuser /app
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app \
+    FLASK_ENV=production \
+    DEBIAN_FRONTEND=noninteractive
+
+# Install system dependencies with security best practices
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     curl \
     git \
     cron \
     procps \
+    ca-certificates \
     && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
 
 # Install Flask and Werkzeug versions that are known to work together
+COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir flask==2.0.1 werkzeug==2.0.1 && \
-    pip install --no-cache-dir gunicorn==20.1.0 fastapi==0.104.1 uvicorn==0.23.2 && \
-    pip install --no-cache-dir requests==2.28.2 backoff==2.2.1 python-dotenv==0.19.2 && \
-    pip install --no-cache-dir flask-cors==3.0.10 flask-socketio==5.1.1 flask-limiter==2.8.1 && \
-    pip install --no-cache-dir python-dateutil==2.8.2 numpy==1.24.3 pillow==10.1.0 && \
-    pip install --no-cache-dir anthropic==0.49.0 && \
-    pip install --no-cache-dir git+https://github.com/fireflyprotocol/bluefin-client-python-sui.git && \
-    pip install --no-cache-dir git+https://github.com/fireflyprotocol/bluefin-v2-client-python.git && \
-    pip install --no-cache-dir httpx websockets
+    pip install --no-cache-dir -r requirements.txt
 
-# Create necessary directories
-RUN mkdir -p logs alerts
+# Create necessary directories and set permissions
+RUN mkdir -p logs alerts && \
+    chown -R appuser:appuser /app/logs /app/alerts
 
 # Copy application code
 COPY . .
+RUN chown -R appuser:appuser /app
 
 # Make scripts executable
 RUN chmod +x *.sh
@@ -40,10 +46,9 @@ RUN echo "*/5 * * * * /app/check_services_docker.sh >> /app/logs/cron.log 2>&1" 
     && chmod 0644 /etc/cron.d/service-check \
     && crontab /etc/cron.d/service-check
 
-# Set environment variables
-ENV PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/app \
-    FLASK_ENV=production
+# Create a health check script
+COPY healthcheck.sh /app/healthcheck.sh
+RUN chmod +x /app/healthcheck.sh
 
 # Expose ports (uses environment variables from .env)
 EXPOSE 5003 5004 5008
@@ -66,11 +71,17 @@ RUN echo '#!/bin/bash' > /app/entrypoint.sh && \
     echo 'fi' >> /app/entrypoint.sh && \
     echo '' >> /app/entrypoint.sh && \
     echo '# Run the python script' >> /app/entrypoint.sh && \
-    echo 'python "$@"' >> /app/entrypoint.sh && \
+    echo 'exec python "$@"' >> /app/entrypoint.sh && \
     chmod +x /app/entrypoint.sh
+
+# Switch to non-root user for security
+USER appuser
 
 # Set the entrypoint
 ENTRYPOINT ["/app/entrypoint.sh"]
 
 # Default to webhook server if no command specified
 CMD ["webhook_server.py"]
+
+# Add health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 CMD ["/app/healthcheck.sh"]

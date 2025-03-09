@@ -117,8 +117,28 @@ The project relies on several external Git repositories:
 The project incorporates several security measures:
 
 - Regular dependency updates to patch vulnerabilities
-- Secure API communication
-- Environment-based configuration to keep sensitive data out of the codebase
+- Non-root user execution in Docker containers
+- Read-only file systems for containers where possible
+- Security-focused Docker settings (no-new-privileges, read-only, tmpfs)
+- Volume mount permissions that limit write access
+- Health checks for all services
+- Secure package versions to prevent known vulnerabilities
+- Automated security scanning tools
+
+### Running Security Checks
+
+You can run security checks on the project using the provided script:
+
+```bash
+./security_checker.sh
+```
+
+This script checks for:
+- Outdated packages
+- Known vulnerabilities in dependencies
+- Exposed secrets or API keys
+- Docker security best practices
+- File permissions
 
 ## Contributing
 
