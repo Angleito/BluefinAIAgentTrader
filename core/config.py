@@ -7,6 +7,11 @@ This file contains all configurable parameters for the trading agent.
 import os
 from typing import Dict, Any
 
+# Server configuration constants
+PORT = int(os.getenv("FLASK_APP_PORT", 5003))
+WEBHOOK_PORT = int(os.getenv("WEBHOOK_PORT", 5004))
+SOCKET_PORT = int(os.getenv("SOCKET_PORT", 5008))
+
 def validate_config(config: Dict[str, Any], section: str):
     """
     Validate a configuration dictionary.
