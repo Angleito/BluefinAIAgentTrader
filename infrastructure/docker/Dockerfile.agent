@@ -1,0 +1,106 @@
+# Use Python 3.10 as the base image
+FROM python:3.10-slim
+
+# Set working directory
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    curl \
+    git \
+    cron \
+    procps \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create a virtual environment
+RUN python3 -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Upgrade pip and install core dependencies
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel
+
+# Install dependencies in the virtual environment with increased timeout and retries
+RUN pip install --no-cache-dir \
+    --default-timeout=100 \
+    --retries 3 \
+    flask==2.0.1 \
+    werkzeug==2.0.3 \
+    gunicorn==20.1.0 \
+    fastapi==0.104.1 \
+    uvicorn==0.23.2 \
+    requests==2.30.0 \
+    backoff==2.2.1 \
+    python-dotenv==0.19.2 \
+    flask-cors==3.0.10 \
+    flask-socketio==5.1.1 \
+    flask-limiter==2.8.1 \
+    python-dateutil==2.8.2 \
+    numpy==1.24.3 \
+    pillow==10.1.0 \
+    anthropic==0.49.0 \
+    httpx \
+    websockets \
+    playwright \
+    python-socketio
+
+# Install Bluefin clients with more flexible version handling
+RUN pip install --no-cache-dir \
+    git+https://github.com/fireflyprotocol/bluefin-client-python-sui.git \
+    git+https://github.com/fireflyprotocol/bluefin-v2-client-python.git \
+    || (echo "First install attempt failed. Trying alternative method." && \
+        pip install --no-cache-dir \
+        git+https://github.com/fireflyprotocol/bluefin-client-python-sui.git \
+        git+https://github.com/fireflyprotocol/bluefin-v2-client-python.git \
+        --no-deps)
+
+# Install playwright browsers
+RUN playwright install --with-deps chromium
+
+# Create necessary directories
+RUN mkdir -p logs alerts analysis screenshots
+
+# Copy application code
+COPY . .
+
+# Make scripts executable
+RUN chmod +x *.sh
+
+# Set up cron job to check services every 5 minutes
+RUN echo "*/5 * * * * /app/check_services_docker.sh >> /app/logs/cron.log 2>&1" > /etc/cron.d/service-check \
+    && chmod 0644 /etc/cron.d/service-check \
+    && crontab /etc/cron.d/service-check
+
+# Set environment variables
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app \
+    FLASK_ENV=production \
+    MOCK_TRADING=true \
+    VIRTUAL_ENV=/opt/venv \
+    PATH="/opt/venv/bin:$PATH"
+
+# Expose ports (uses environment variables from .env)
+EXPOSE 5003 5004 5008
+
+# Create a wrapper script to start services
+RUN echo '#!/bin/bash' > /app/entrypoint.sh && \
+    echo 'echo "Starting PerplexityTrader Agent"' >> /app/entrypoint.sh && \
+    echo 'echo "Current directory: $(pwd)"' >> /app/entrypoint.sh && \
+    echo 'echo "Python path: $PYTHONPATH"' >> /app/entrypoint.sh && \
+    echo 'echo "Environment: $FLASK_ENV"' >> /app/entrypoint.sh && \
+    echo '' >> /app/entrypoint.sh && \
+    echo '# Start cron service' >> /app/entrypoint.sh && \
+    echo 'echo "Starting periodic command scheduler: cron."' >> /app/entrypoint.sh && \
+    echo 'service cron start' >> /app/entrypoint.sh && \
+    echo '' >> /app/entrypoint.sh && \
+    echo '# Run the python script' >> /app/entrypoint.sh && \
+    echo 'echo "Starting: $@"' >> /app/entrypoint.sh && \
+    echo 'python "$@"' >> /app/entrypoint.sh && \
+    chmod +x /app/entrypoint.sh
+
+# Set the entrypoint
+ENTRYPOINT ["/app/entrypoint.sh"]
+
+# Default to agent.py if no command specified
+CMD ["simple_agent.py"] 

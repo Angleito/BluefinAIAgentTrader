@@ -1,0 +1,117 @@
+version: '3.8'
+
+services:
+  nginx:
+    image: nginx:alpine
+    volumes:
+      - ./nginx.simple.conf:/etc/nginx/nginx.conf:ro
+      - ./index.html:/usr/share/nginx/html/index.html:ro
+    ports:
+      - "${NGINX_PORT:-8080}:80"
+    restart: always
+    networks:
+      - perplexity-network
+    depends_on:
+      - webhook
+      - websocket
+      - agent
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+  
+  webhook:
+    container_name: docker_webhook_1
+    image: python:3.10-slim
+    volumes:
+      - ./simple_webhook.py:/app/simple_webhook.py
+      - ../../logs:/app/logs
+      - ./.env:/app/.env
+    working_dir: /app
+    command: sh -c "pip install flask==2.0.1 werkzeug==2.0.3 python-dotenv==0.19.2 && python simple_webhook.py"
+    environment:
+      - WEBHOOK_PORT=${WEBHOOK_PORT:-5004}
+      - WEBHOOK_HOST=${WEBHOOK_HOST:-0.0.0.0}
+      - PYTHONUNBUFFERED=1
+    restart: always
+    ports:
+      - "${WEBHOOK_PORT:-5004}:${WEBHOOK_PORT:-5004}"
+    networks:
+      - perplexity-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:${WEBHOOK_PORT:-5004}/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  websocket:
+    container_name: docker_websocket_1
+    image: python:3.10-slim
+    volumes:
+      - ./simple_websocket.py:/app/simple_websocket.py
+      - ../../logs:/app/logs
+      - ./.env:/app/.env
+    working_dir: /app
+    command: sh -c "pip install flask==2.0.1 werkzeug==2.0.3 python-dateutil==2.8.2 python-dotenv==0.19.2 && python simple_websocket.py"
+    environment:
+      - WEBSOCKET_PORT=${WEBSOCKET_PORT:-5008}
+      - WEBSOCKET_HOST=${WEBSOCKET_HOST:-0.0.0.0}
+      - PYTHONUNBUFFERED=1
+    restart: always
+    ports:
+      - "${WEBSOCKET_PORT:-5008}:${WEBSOCKET_PORT:-5008}"
+    networks:
+      - perplexity-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:${WEBSOCKET_PORT:-5008}/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  agent:
+    container_name: docker_agent_1
+    build:
+      context: ../..
+      dockerfile: infrastructure/docker/Dockerfile.agent
+    volumes:
+      - ../..:/app
+      - ./logs:/app/logs
+      - ./screenshots:/app/screenshots
+      - ../../.env:/app/.env
+    working_dir: /app
+    environment:
+      - AGENT_PORT=${AGENT_PORT:-5003}
+      - AGENT_HOST=${AGENT_HOST:-0.0.0.0}
+      - MOCK_TRADING=${MOCK_TRADING:-true}
+      - PYTHONUNBUFFERED=1
+      - BLUEFIN_NETWORK=${BLUEFIN_NETWORK:-SUI_PROD}
+      - BLUEFIN_PRIVATE_KEY=${BLUEFIN_PRIVATE_KEY}
+      - BLUEFIN_API_KEY=${BLUEFIN_API_KEY}
+      - BLUEFIN_API_SECRET=${BLUEFIN_API_SECRET}
+      - VIRTUAL_ENV=/opt/venv
+      - PATH=/opt/venv/bin:$PATH
+      - BLUEFIN_DEFAULT_SYMBOL=SUI-PERP
+      - BLUEFIN_DEFAULT_TRADE_INTERVAL=15m
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - CLAUDE_MODEL=claude-3-haiku-20240307
+      - PERPLEXITY_API_KEY=${PERPLEXITY_API_KEY}
+      - PERPLEXITY_MODEL=sonar-pro
+    restart: always
+    ports:
+      - "${AGENT_PORT:-5003}:${AGENT_PORT:-5003}"
+    networks:
+      - perplexity-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:${AGENT_PORT:-5003}/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+networks:
+  perplexity-network:
+    driver: bridge 
