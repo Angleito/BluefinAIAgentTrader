@@ -1,0 +1,152 @@
+version: '3.8'
+
+x-build-args: &build-args
+  args:
+    - BUILDKIT_INLINE_CACHE=1
+
+services:
+  webhook:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      platforms:
+        - linux/amd64
+        - linux/arm64
+      cache_from:
+        - type=local,src=/tmp/.buildx-cache
+        - type=registry,ref=perplexitytrader/webhook:buildcache
+      cache_to:
+        - type=local,dest=/tmp/.buildx-cache
+        - type=registry,ref=perplexitytrader/webhook:buildcache,mode=max
+      <<: *build-args
+    image: perplexitytrader-webhook:${TAG:-latest}
+    volumes:
+      - ../../alerts:/app/alerts
+      - ../../logs:/app/logs
+      - ../../core:/app/core
+      - ./.env:/app/.env
+    environment:
+      - WEBHOOK_PORT=${WEBHOOK_PORT:-5004}
+      - WEBHOOK_HOST=${WEBHOOK_HOST:-0.0.0.0}
+      - USE_HOOKDECK=${USE_HOOKDECK:-true}
+      - HOOKDECK_API_KEY=${HOOKDECK_API_KEY}
+      - HOOKDECK_SIGNING_SECRET=${HOOKDECK_SIGNING_SECRET}
+      - HOOKDECK_SOURCE_NAME=${HOOKDECK_SOURCE_NAME:-TradingView}
+      - AGENT_API_URL=${AGENT_API_URL}
+      - PYTHONUNBUFFERED=1
+    restart: no
+    ports:
+      - "${WEBHOOK_PORT:-5004}:${WEBHOOK_PORT:-5004}"
+    networks:
+      - perplexity-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:${WEBHOOK_PORT:-5004}/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    command: ["simple_webhook.py"]
+
+  websocket:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      platforms:
+        - linux/amd64
+        - linux/arm64
+      cache_from:
+        - type=local,src=/tmp/.buildx-cache
+        - type=registry,ref=perplexitytrader/websocket:buildcache
+      cache_to:
+        - type=local,dest=/tmp/.buildx-cache
+        - type=registry,ref=perplexitytrader/websocket:buildcache,mode=max
+      <<: *build-args
+    image: perplexitytrader-websocket:${TAG:-latest}
+    volumes:
+      - ../../logs:/app/logs
+      - ../../core:/app/core
+      - ./.env:/app/.env
+    environment:
+      - SOCKET_PORT=${SOCKET_PORT:-5008}
+      - WEBSOCKET_PATH=${WEBSOCKET_PATH:-/socket.io}
+      - PYTHONUNBUFFERED=1
+    restart: no
+    ports:
+      - "${SOCKET_PORT:-5008}:${SOCKET_PORT:-5008}"
+    networks:
+      - perplexity-network
+    depends_on:
+      - webhook
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:${SOCKET_PORT:-5008}/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    command: ["simple_websocket.py"]
+
+  agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+    image: perplexitytrader-agent:latest
+    volumes:
+      - ../../logs:/app/logs
+      - ../../alerts:/app/alerts
+      - ../../core:/app/core
+      - ../../analysis:/app/analysis
+      - ./.env:/app/.env
+    environment:
+      - FLASK_APP_PORT=${FLASK_APP_PORT:-5003}
+      - PYTHONUNBUFFERED=1
+      - MOCK_TRADING=true
+    restart: no
+    ports:
+      - "${FLASK_APP_PORT:-5003}:${FLASK_APP_PORT:-5003}"
+    depends_on:
+      - webhook
+      - websocket
+    networks:
+      - perplexity-network
+    shm_size: 2gb
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:${FLASK_APP_PORT:-5003}/health || exit 1"]
+      interval: 45s
+      timeout: 15s
+      retries: 3
+      start_period: 30s
+    command: ["simple_agent.py"]
+
+  nginx:
+    image: nginx:alpine
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./index.html:/usr/share/nginx/html/index.html:ro
+    ports:
+      - "${NGINX_PORT:-8080}:80"
+    restart: no
+    depends_on:
+      - webhook
+      - agent
+      - websocket
+    networks:
+      - perplexity-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  watchtower:
+    image: containrrr/watchtower
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: --interval 86400 --cleanup
+    restart: no
+    networks:
+      - perplexity-network
+
+networks:
+  perplexity-network:
+    driver: bridge

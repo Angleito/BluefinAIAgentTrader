@@ -1,137 +1,122 @@
 # PerplexityTrader
 
-An automated trading system that uses TradingView alerts to execute trades on the Bluefin Exchange.
+PerplexityTrader is an AI-powered crypto trading platform that combines the analytical capabilities of Claude and Perplexity AI to make informed trading decisions in the cryptocurrency market.
 
-## Features
+## System Architecture
 
-- Receives webhook alerts from TradingView
-- Processes VuManChu Cipher B signals
-- Executes trades on Bluefin Exchange
-- Supports real money trading
-- 24/7 operation with automatic monitoring and restart
+The system consists of the following components:
 
-## Position Doubling Feature
+1. **Web Server (Nginx)**: Serves the web interface and proxies requests to the backend services.
+2. **Trading Agent**: Analyzes market data and executes trades.
+3. **Webhook Service**: Receives alerts from external sources like TradingView.
+4. **WebSocket Service**: Provides real-time updates to the web interface.
 
-When the system executes a trade in live mode, it checks for any open positions in the same ticker. If there is an existing position in the opposite direction (e.g., a LONG position when trying to execute a SELL trade), the system will double the position size to both close the existing position and open a new one in the opposite direction.
+## Getting Started
 
-This feature ensures that:
+### Prerequisites
 
-1. Existing positions are properly closed before opening new ones in the opposite direction
-2. The position size is automatically adjusted to handle the position flip
-3. The system can seamlessly transition between long and short positions
+- Docker and Docker Compose
+- Bash shell
 
-### How It Works
+### Installation
 
-1. Before executing a trade, the system checks for existing positions in the same symbol
-2. If an existing position is found in the opposite direction, the system doubles the position size
-3. This doubled position size is used to:
-   - Close the existing position (using the first half of the size)
-   - Open a new position in the opposite direction (using the second half of the size)
-
-### Example
-
-If you have a LONG position of 1.0 SUI-PERP and the system receives a signal to SELL:
-
-1. The system detects the existing LONG position of size 1.0
-2. It doubles the position size to 2.0
-3. The first 1.0 closes the existing LONG position
-4. The second 1.0 opens a new SHORT position
-
-This ensures smooth position flipping without having to manually close positions before opening new ones in the opposite direction.
-
-## Setup
-
-1. Clone this repository
-2. Install dependencies:
-   ```
-   pip install -r requirements.txt
-   pip install git+https://github.com/fireflyprotocol/bluefin-client-python-sui.git
-   pip install git+https://github.com/fireflyprotocol/bluefin-v2-client-python.git
-   ```
-3. Set up environment variables in `.env` file:
-   ```
-   BLUEFIN_PRIVATE_KEY=your_private_key
-   BLUEFIN_NETWORK=MAINNET
-   MOCK_TRADING=False
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/yourusername/perplexitytrader.git
+   cd perplexitytrader
    ```
 
-## Running the System
-
-### Using Background Scripts (Recommended)
-
-1. Start the services:
-   ```
-   ./start_services.sh
+2. Start the Docker environment:
+   ```bash
+   ./start_docker.sh
    ```
 
-2. Check the status:
-   ```
-   ./check_status.sh
-   ```
+3. Access the web interface at http://localhost:8080
 
-3. Stop the services:
-   ```
-   ./stop_services.sh
-   ```
+### Usage
 
-### Using Systemd Services (Linux Only)
+- **Web Interface**: Access the web interface at http://localhost:8080
+- **Agent API**: Access the agent API at http://localhost:8080/api/
+- **Webhook**: Send alerts to http://localhost:8080/webhook
+- **WebSocket**: Connect to the WebSocket at http://localhost:8080/ws
 
-1. Install the services:
-   ```
-   sudo ./install_services.sh
-   ```
+### Scripts
 
-2. Check the status:
-   ```
-   systemctl status perplexitytrader.service perplexitytrader-webhook.service
-   ```
+- `start_docker.sh`: Starts the Docker environment
+- `stop_docker.sh`: Stops the Docker environment
+- `check_status.sh`: Checks the status of the Docker environment
 
-3. View logs:
-   ```
-   journalctl -u perplexitytrader.service -f
-   journalctl -u perplexitytrader-webhook.service -f
-   ```
+## Development
 
-## TradingView Setup
+### Directory Structure
 
-1. Create a TradingView alert with the following webhook URL:
-   ```
-   https://your-ngrok-domain/webhook
-   ```
+- `infrastructure/docker/`: Docker configuration files
+- `core/`: Core trading logic
+- `logs/`: Log files
+- `analysis/`: Analysis results
 
-2. Format the alert message as JSON:
-   ```json
-   {
-     "indicator": "vmanchu_cipher_b",
-     "symbol": "{{ticker}}",
-     "timeframe": "{{interval}}",
-     "signal_type": "GREEN_CIRCLE",
-     "action": "{{strategy.order.action}}",
-     "price": {{close}},
-     "timestamp": "{{timenow}}"
-   }
-   ```
+### Environment Variables
 
-## Monitoring
+The following environment variables can be set in the `.env` file:
 
-The system includes automatic monitoring and restart capabilities:
+- `NGINX_PORT`: Port for the web server (default: 8080)
+- `AGENT_PORT`: Port for the trading agent (default: 5003)
+- `WEBHOOK_PORT`: Port for the webhook service (default: 5004)
+- `WEBSOCKET_PORT`: Port for the WebSocket service (default: 5008)
+- `MOCK_TRADING`: Enable mock trading (default: true)
 
-- `check_services.sh` - Checks if services are running and restarts them if needed
-- `crontab_setup.sh` - Sets up a cron job to run the check script every 5 minutes
+## License
 
-## Configuration
+This project is licensed under the MIT License - see the LICENSE file for details.
 
-Edit `config/config.py` to customize trading parameters:
+## Acknowledgements
 
-- Trading parameters (leverage, position size, etc.)
-- Risk parameters (max risk per trade, max open positions, etc.)
-- AI parameters (confidence thresholds, etc.)
+- [Claude AI](https://www.anthropic.com/claude) for providing the AI analysis
+- [Perplexity AI](https://www.perplexity.ai/) for providing the AI analysis
+- [Bluefin Exchange](https://www.bluefin.io/) for the trading API
 
-## Logs
+## Multi-Architecture Docker Builds
 
-Logs are stored in the `logs` directory:
+### Prerequisites
+- Docker 19.03 or newer
+- Docker BuildX plugin
+- Docker Compose v2
 
-- `logs/webhook.log` - Webhook server logs
-- `logs/agent.log` - Trading agent logs
-- `logs/webhook_nohup.log` - Webhook server nohup logs
-- `logs/agent_nohup.log` - Trading agent nohup logs
+### Building Multi-Architecture Images
+
+#### Local Build and Test
+```bash
+# Build for current architecture
+docker build -t perplexitytrader-webhook:latest .
+
+# Build for specific platforms locally
+docker buildx build \
+  --platform linux/amd64 \
+  -t perplexitytrader-webhook:latest \
+  --load .
+```
+
+#### Pushing Multi-Architecture Images
+```bash
+# Use the provided build script to build and push
+./build.sh [optional-tag]
+
+# Or manually build and push
+docker buildx build \
+  --platform linux/amd64,linux/arm64 \
+  -t perplexitytrader-webhook:latest \
+  --push .
+```
+
+### Supported Architectures
+- `linux/amd64` (x86_64)
+- `linux/arm64` (ARM 64-bit)
+
+### Caching Strategies
+- Local build cache: `/tmp/.buildx-cache`
+- Registry build cache: `perplexitytrader/webhook:buildcache`
+
+### Troubleshooting
+- Ensure Docker BuildX is installed: `docker buildx version`
+- Check available builders: `docker buildx ls`
+- Create a new builder: `docker buildx create --use`
