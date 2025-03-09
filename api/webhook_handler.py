@@ -9,14 +9,18 @@ from core.signal_processor import process_signal
 from core.chart_analyzer import analyze_chart
 from core.trade_executor import execute_trade
 
+# Import the strategy manager
+from core.strategy_manager import strategy_manager
+
 logger = logging.getLogger(__name__)
 
 class SignalModel(BaseModel):
     type: str
     symbol: str
     timeframe: str
-    indicators: dict
-    confidence: float
+    indicators: dict = {}
+    confidence: float = 0.5
+    strategy: str = None  # Optional field to specify which strategy to use
 
 router = APIRouter()
 
@@ -25,32 +29,77 @@ async def tradingview_webhook(signal: SignalModel):
     logger.info(f"Received signal: {signal}")
 
     try:
-        # Process the signal
-        processed_signal = process_signal(signal)
-        
-        if not processed_signal:
-            logger.warning("Signal rejected")
-            return {"status": "rejected", "reason": "Signal processing failed"}
-
-        # Analyze the chart with Perplexity
-        analysis_result = await analyze_chart(processed_signal)
-
-        if analysis_result["trade_confirmed"]:
-            # Get Bluefin client from global context
-            from main import bluefin_client
+        # If a specific strategy is provided, process with that strategy
+        if signal.strategy == "momentum":
+            # Process using momentum strategy directly
+            logger.info("Processing with momentum strategy")
+            from core.chart_analyzer import analyze_chart_with_momentum
             
-            # Execute the trade
-            trade_result = await execute_trade(bluefin_client, processed_signal)
+            momentum_analysis = await analyze_chart_with_momentum(
+                symbol=signal.symbol,
+                timeframe=signal.timeframe
+            )
             
-            if trade_result:
-                logger.info(f"Trade executed: {trade_result}")
-                return {"status": "success", "trade": trade_result}
-            else:
-                logger.warning("Trade execution failed")
-                return {"status": "failed", "reason": "Trade execution failed"}
+            if not momentum_analysis or not momentum_analysis.get("success", False):
+                logger.warning("Momentum analysis failed")
+                return {"status": "rejected", "reason": "Momentum analysis failed"}
+            
+            processed_signal = {
+                "symbol": signal.symbol,
+                "type": "buy" if momentum_analysis.get("signal") in ["BUY", "STRONG_BUY"] else 
+                        "sell" if momentum_analysis.get("signal") in ["SELL", "STRONG_SELL"] else "hold",
+                "timeframe": signal.timeframe,
+                "signal_type": momentum_analysis.get("signal"),
+                "entry_price": momentum_analysis.get("entry_price"),
+                "stop_loss": momentum_analysis.get("stop_loss"),
+                "take_profit": momentum_analysis.get("take_profit"),
+                "confidence": momentum_analysis.get("confidence", 0.5),
+                "signal_source": "momentum",
+                "metrics": momentum_analysis.get("metrics", {})
+            }
         else:
-            logger.info(f"Trade not confirmed: {analysis_result['reason']}")
-            return {"status": "rejected", "reason": "Trade not confirmed"}
+            # Use strategy manager to get combined signals from all active strategies
+            logger.info("Processing with strategy manager")
+            trading_signal = await strategy_manager.get_trading_signal(
+                symbol=signal.symbol,
+                timeframe=signal.timeframe
+            )
+            
+            if not trading_signal or trading_signal.get("signal") == "HOLD":
+                logger.info("No actionable signal from strategy manager")
+                return {"status": "rejected", "reason": "No actionable signal"}
+            
+            processed_signal = {
+                "symbol": trading_signal.get("symbol"),
+                "type": "buy" if trading_signal.get("signal") in ["BUY", "STRONG_BUY"] else 
+                        "sell" if trading_signal.get("signal") in ["SELL", "STRONG_SELL"] else "hold",
+                "timeframe": trading_signal.get("timeframe"),
+                "signal_type": trading_signal.get("signal"),
+                "entry_price": trading_signal.get("entry_price"),
+                "stop_loss": trading_signal.get("stop_loss"),
+                "take_profit": trading_signal.get("take_profit"),
+                "confidence": trading_signal.get("confidence", 0.5),
+                "signal_source": trading_signal.get("signal_source"),
+                "contributing_strategies": trading_signal.get("contributing_strategies", [])
+            }
+        
+        # Skip holding signals
+        if processed_signal["type"] == "hold":
+            logger.info("Hold signal - no trade execution needed")
+            return {"status": "hold", "reason": "Hold signal"}
+        
+        # Get Bluefin client from global context
+        from main import bluefin_client
+        
+        # Execute the trade
+        trade_result = await execute_trade(bluefin_client, processed_signal)
+        
+        if trade_result:
+            logger.info(f"Trade executed: {trade_result}")
+            return {"status": "success", "trade": trade_result}
+        else:
+            logger.warning("Trade execution failed")
+            return {"status": "failed", "reason": "Trade execution failed"}
 
     except Exception as e:
         logger.exception(f"Error processing signal: {e}")
@@ -101,6 +150,14 @@ async def take_chart_screenshot(signal):
             await page.click("button.addIndicator-2U9QKwgs")
             await page.fill(".search-ZXzPWlJ1 input", "VumanChu Cipher B") 
             await page.click("text=VumanChu Cipher B")
+            
+            # Add momentum indicators
+            indicators_to_add = ["RSI", "MACD", "OBV", "Bollinger Bands"]
+            for indicator in indicators_to_add:
+                await page.click("button.addIndicator-2U9QKwgs")
+                await page.fill(".search-ZXzPWlJ1 input", indicator)
+                await page.click(f"text={indicator}")
+                await asyncio.sleep(0.5)
             
             await asyncio.sleep(5)
             
