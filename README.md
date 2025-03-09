@@ -1,402 +1,380 @@
 # BluefinAIAgentTrader
 
-BluefinAIAgentTrader is an AI-powered cryptocurrency trading platform that leverages advanced AI models and real-time market data to make intelligent trading decisions on the Bluefin Exchange. The system combines webhook integrations, websocket communication, and AI analysis to provide a comprehensive trading solution.
-
-This project was developed with the assistance of [Cursor](https://cursor.sh/), an AI-powered code editor.
+BluefinAIAgentTrader is an advanced AI-powered cryptocurrency trading platform designed to execute intelligent trading strategies on the Bluefin Exchange. The system integrates sophisticated AI models with real-time market data analysis and robust infrastructure to provide a comprehensive automated trading solution for cryptocurrency markets.
 
 ## Table of Contents
 
-- [Overview](#overview)
-- [Features](#features)
-- [Project Structure](#project-structure)
-- [Getting Started](#getting-started)
-  - [Prerequisites](#prerequisites)
-  - [Installation](#installation)
-  - [Running the Agent Stack](#running-the-agent-stack)
-- [Core Components](#core-components)
-  - [Webhook Service](#webhook-service-port-5004)
-  - [WebSocket Service](#websocket-service-port-5008)
-  - [Agent Service](#agent-service-port-5003)
-  - [Web Interface](#web-interface-port-8080)
-- [Configuration](#configuration)
+- [Key Features](#key-features)
+- [System Architecture](#system-architecture)
+- [Prerequisites](#prerequisites)
+- [Quick Start](#quick-start)
+- [Docker Deployment Details](#docker-deployment-details)
+- [Configuration Management](#configuration-management)
 - [Trading Workflow](#trading-workflow)
-  - [Signal Reception and Processing](#signal-reception-and-processing)
-  - [Decision Making Process](#decision-making-process)
-  - [Bluefin Exchange Integration](#bluefin-exchange-integration)
-  - [Position Management](#position-management)
-  - [Notification and Reporting](#notification-and-reporting)
-  - [Fail-safe Mechanisms](#fail-safe-mechanisms)
-- [AI Models and Integrations](#ai-models-and-integrations)
-- [Security](#security)
-- [Health Monitoring](#health-monitoring)
-- [External Dependencies](#external-dependencies)
-- [Acknowledgements](#acknowledgements)
+- [Monitoring and Logging](#monitoring-and-logging)
+- [Security Considerations](#security-considerations)
 - [Contributing](#contributing)
 - [License](#license)
+- [Support](#support)
 
-## Overview
+## Key Features
 
-BluefinAIAgentTrader consists of several interconnected components:
+- 🤖 **AI-Powered Trading Strategy** - Leverages Claude and Perplexity AI models for decision making
+- 📊 **Real-Time Market Data Analysis** - Continuous monitoring of market conditions and price action
+- 🔗 **Multi-Service Microservices Architecture** - Scalable and resilient containerized services
+- 🌐 **WebSocket Real-Time Updates** - Live data streaming and event notifications
+- 🚀 **Automated Trade Execution** - Hands-free position management and execution
+- 🛡️ **Advanced Risk Management** - Sophisticated position sizing and drawdown protection
+- 📈 **Performance Monitoring and Logging** - Comprehensive trade tracking and analytics
 
-1. **Webhook Service**: Receives external alerts and trading signals (e.g., from TradingView)
-2. **WebSocket Service**: Provides real-time updates to the user interface
-3. **Agent Service**: Core AI-powered trading engine that processes market data and executes trades
-4. **Web Interface**: User dashboard for monitoring and controlling the trading system
+## System Architecture
 
-## Features
+BluefinAIAgentTrader employs a microservices architecture with three primary containerized services:
 
-- AI-powered trading strategy development and execution
-- Real-time market data analysis and decision making
-- Webhook integration for external signal providers
-- WebSocket-based real-time trading dashboard
-- Comprehensive risk management and position sizing
-- Detailed performance tracking and reporting
-- Multiple deployment options with Docker Compose
-- Security-focused configuration and monitoring
+1. **Websocket Service** (Port 5008)
+   - Real-time market data streaming
+   - User interface updates and notifications
+   - Event broadcasting to connected clients
+   - Trading signal distribution
 
-## Project Structure
+2. **Webhook Service** (Port 5004)
+   - External signal ingestion (TradingView, custom providers)
+   - Trading signal validation and processing
+   - Alert management and filtering
+   - Initial data enrichment
 
-```
-BluefinAIAgentTrader/
-├── api/                         # API implementations
-├── bluefin_env/                 # Bluefin Exchange integration
-├── config/                      # Configuration files
-├── core/                        # Core trading logic and strategies
-├── examples/                    # Example scripts and configurations
-├── frontend/                    # Web UI components and assets
-├── infrastructure/              # Infrastructure configurations
-│   └── docker/                  # All Docker configuration and services
-│       ├── docker-compose.yml            # Main Docker Compose configuration
-│       ├── docker-compose.simple.yml     # Simplified Docker Compose for easier startup
-│       ├── docker-compose.prod.yml       # Production-ready Docker Compose config
-│       ├── Dockerfile                    # Main service Dockerfile
-│       ├── Dockerfile.agent              # AI agent-specific Dockerfile
-│       ├── requirements.txt              # Python dependencies
-│       ├── app.py                        # Main application entry point
-│       ├── simple_agent.py               # Simplified agent implementation
-│       ├── simple_webhook.py             # Simplified webhook implementation
-│       ├── simple_websocket.py           # Simplified websocket implementation
-│       ├── webhook_server.py             # Full webhook server implementation
-│       ├── websocket_server.py           # Full websocket server implementation
-│       ├── healthcheck.sh                # Health check script for containers
-│       ├── check_services_docker.sh      # Service monitoring script
-│       └── nginx.conf                    # Nginx web server configuration
-├── logs/                        # System logs
-├── src/                         # Source code for main application
-├── test/                        # Test files and test configurations
-├── .env.example                 # Example environment variables file
-├── .gitignore                   # Git ignore rules
-└── README.md                    # This documentation file
-```
+3. **Agent Service** (Port 5003)
+   - Core AI trading engine
+   - Market data analysis and pattern recognition
+   - Trade decision making and execution
+   - Risk assessment and position sizing
 
-## Getting Started
+## Prerequisites
 
-### Prerequisites
-
-- Docker and Docker Compose
+- Docker (20.10+)
+- Docker Compose (1.29+)
 - Git
+- Minimum 8GB RAM
+- Internet connection for API access
+- Bluefin Exchange API credentials
 
-### Installation
+## Quick Start
 
-1. Clone the repository:
-   ```bash
-   git clone https://github.com/Angleito/BluefinAIAgentTrader.git
-   cd BluefinAIAgentTrader
-   ```
-
-2. Copy the example environment file and configure:
-   ```bash
-   cp .env.example .env
-   # Edit .env with your specific configuration
-   ```
-
-3. Build and start the services:
-   ```bash
-   cd infrastructure/docker
-   docker-compose -f docker-compose.simple.yml up
-   ```
-
-### Running the Agent Stack
-
-The entire agent stack can be started using Docker Compose from the `infrastructure/docker` directory:
+### 1. Clone the Repository
 
 ```bash
-cd infrastructure/docker
-docker-compose -f docker-compose.simple.yml up
+git clone https://github.com/Angleito/BluefinAIAgentTrader.git
+cd BluefinAIAgentTrader
 ```
 
-For production deployments, use:
+### 2. Configure Environment
+
 ```bash
-cd infrastructure/docker
-docker-compose -f docker-compose.prod.yml up -d
+# Copy example environment file
+cp .env.example .env
+
+# Edit .env with your specific configurations
+# Particularly important: API keys, exchange credentials
+nano .env
 ```
 
-For testing configurations:
+### 3. Deploy the Stack
+
 ```bash
-cd infrastructure/docker
-docker-compose -f docker-compose.test.yml up
+# Production Deployment
+./start_production.sh
+
+# Development Deployment
+./start_development.sh
 ```
 
-## Core Components
+## Docker Deployment Details
 
-### Webhook Service (port 5004)
-Receives external signals and alerts, processes them, and forwards to the agent for action. Access at `http://localhost:5004/webhook`.
+### Core Services
 
-The webhook service is implemented in two versions:
-- `simple_webhook.py`: A simplified version for quick testing
-- `webhook_server.py`: The full-featured implementation
+- **nginx**: Reverse proxy and web server for API routing
+- **websocket**: Real-time communication service for data streaming
+- **webhook**: External signal receiver and processor
+- **agent**: Core AI-powered trading engine
+- **watchtower**: Automatic container updates and security patches
 
-### WebSocket Service (port 5008)
-Provides real-time updates and notifications to the web interface. Connect at `ws://localhost:5008/socket.io`.
+### Deployment Modes
 
-The websocket service is implemented in two versions:
-- `simple_websocket.py`: A simplified version for quick testing
-- `websocket_server.py`: The full-featured implementation
+1. **Production Mode** (`start_production.sh`)
+   - Full stack deployment with all services
+   - Persistent volume storage for logs and data
+   - Automatic service health monitoring
+   - Enhanced security configurations
+   - Cron scheduled health checks
+   - Resource optimization for production use
 
-### Agent Service (port 5003)
-The AI-powered trading engine that analyzes market data and executes trades. API available at `http://localhost:5003/api`.
+2. **Development Mode** (`start_development.sh`)
+   - Includes additional debugging tools
+   - Verbose logging for troubleshooting
+   - Hot-reloading for code changes
+   - Exposed additional ports for debugging
+   - Development-specific environment settings
 
-The agent service is implemented in:
-- `simple_agent.py`: A simplified version for quick testing
-- `app.py`: The main application that integrates all services
+## Configuration Management
 
-### Web Interface (port 8080)
-User dashboard for monitoring and controlling the trading system. Access at `http://localhost:8080`.
+Configuration is managed through environment variables in `.env`:
 
-## Configuration
-
-Key configuration options are controlled through environment variables in the `.env` file:
-
-- `NGINX_PORT`: Web interface port (default: 8080)
-- `FLASK_APP_PORT`: Agent API port (default: 5003)
-- `WEBHOOK_PORT`: Webhook service port (default: 5004)
-- `SOCKET_PORT`: WebSocket service port (default: 5008)
-- `MOCK_TRADING`: Enable mock trading mode (default: true)
-- `ANTHROPIC_API_KEY`: API key for Claude AI services
-- `PERPLEXITY_API_KEY`: API key for Perplexity AI services
-- `BLUEFIN_API_KEY`: API key for Bluefin Exchange
-- `BLUEFIN_API_SECRET`: API secret for Bluefin Exchange
-- `BLUEFIN_PRIVATE_KEY`: Private key for Bluefin Exchange transactions
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `BLUEFIN_API_KEY` | Bluefin Exchange API Key | `your-api-key` |
+| `BLUEFIN_API_SECRET` | Bluefin Exchange API Secret | `your-api-secret` |
+| `BLUEFIN_PRIVATE_KEY` | Private key for Bluefin | `your-private-key` |
+| `AI_MODEL_PROVIDER` | Selected AI model | `claude` or `perplexity` |
+| `ANTHROPIC_API_KEY` | Claude API credentials | `your-anthropic-key` |
+| `PERPLEXITY_API_KEY` | Perplexity AI credentials | `your-perplexity-key` |
+| `TRADING_MODE` | Real or simulated | `real` or `simulation` |
+| `RISK_TOLERANCE` | Risk management setting | `conservative`, `moderate`, `aggressive` |
+| `MAX_POSITION_SIZE` | Maximum position sizing | `0.05` (5% of portfolio) |
+| `WEBHOOK_PORT` | Custom webhook port | `5004` |
+| `SOCKET_PORT` | Custom websocket port | `5008` |
+| `AGENT_PORT` | Custom agent port | `5003` |
 
 ## Trading Workflow
 
-The BluefinAIAgentTrader follows a sophisticated workflow for making and executing trading decisions on Bluefin Exchange.
+BluefinAIAgentTrader implements a sophisticated multi-agent trading system designed to provide intelligent, data-driven cryptocurrency trading. The system follows a complete end-to-end workflow described below.
 
-### Signal Reception and Processing
+### 1. System Initialization
 
-1. **External Signal Reception**:
-   - Trading signals are received through the webhook server (`webhook_server.py`), typically from TradingView or other signal providers
-   - Signals contain information like asset pair, direction (long/short), entry price, stop loss, take profit, and confidence level
-   - The webhook server validates the signature and structure of incoming signals before processing
+When the production system starts via `./start_production.sh`, the following initialization occurs:
 
-2. **Signal Enrichment**:
-   - Raw signals are enriched with additional market data from various sources
-   - The system fetches current market conditions, liquidity depth, recent price action, and volatility metrics
-   - Historical performance of similar signals is analyzed for pattern recognition
+**Container Deployment**
+- Docker pulls necessary images and builds custom containers
+- Containers are created with non-root `appuser` for security
+- Network `bluefinai-network` is established for inter-service communication
+- Volume mounts for persistent data and logs are configured
+- Health check scripts (`healthcheck.sh`) are installed
 
-3. **AI Analysis**:
-   - Enriched signals are passed to the AI model (Claude by Anthropic) through the agent service
-   - The AI performs multi-factor analysis including:
-     - Technical analysis confirmation (trend direction, support/resistance levels)
-     - Market sentiment analysis from news and social media
-     - Pattern recognition from historical similar market conditions
-     - Risk assessment based on current portfolio exposure
+**Service Startup Sequence**
+- Nginx service starts first to establish the web interface
+- Webhook, WebSocket, and Agent services initialize in parallel
+- Each service verifies connectivity to required external APIs
+- Environment variables from `.env` are loaded and validated
+- Initial system state is logged to `/logs` directory
 
-### Decision Making Process
+### 2. Market Data Acquisition
 
-1. **Signal Qualification**:
-   - The agent first determines if a signal meets the minimum qualifications for consideration
-   - Checks include: signal freshness, source reputation, minimum confidence threshold
-   - Signals that don't meet basic criteria are logged but not acted upon
+The first phase in the trading cycle is gathering market data:
 
-2. **Position Sizing Calculation**:
-   - For qualified signals, the agent calculates appropriate position size based on:
-     - Current portfolio value and allocation limits
-     - Risk parameters (maximum drawdown allowed per trade)
-     - Volatility-adjusted position sizing to maintain consistent risk
-     - Kelly criterion application for optimal position sizing
+**Data Sources**
+- **Bluefin Exchange API**: Real-time order book, price data, and trade execution
+- **WebSocket Feeds**: Live price updates and market events
+- **Historical Data**: Used for pattern recognition and backtesting
+- **External Webhooks**: Signals from TradingView or custom providers
 
-3. **Trade Decision**:
-   - The final decision incorporates:
-     - AI model recommendation (confidence score from 0-1)
-     - Current account exposure and diversification
-     - Market conditions (volatility, liquidity, spread)
-     - Risk management rules (maximum drawdown, maximum positions)
-   - Decision outputs include: trade/no trade, direction, position size, entry price range, stop loss, take profit
+**Data Processing**
+- Raw market data is normalized and cleaned
+- Time-series data is aggregated into different timeframes (1m, 5m, 15m, 1h, 4h, 1d)
+- Technical indicators are calculated (RSI, MACD, Bollinger Bands, etc.)
+- Order book analysis provides liquidity insights
+- Funding rates and open interest metrics are monitored for derivatives
 
-### Bluefin Exchange Integration
+### 3. Signal Generation & Reception
 
-1. **Authentication and Connection**:
-   - The agent connects to Bluefin Exchange using the Bluefin API client libraries
-   - Authentication is performed using API key, secret, and private key credentials stored in `.env`
-   - A secure websocket connection is established for real-time order book and execution updates
+Signals come from both internal analysis and external sources:
 
-2. **Market Data Retrieval**:
-   - Before execution, the agent retrieves:
-     - Current order book depth to assess liquidity
-     - Recent trades to identify potential slippage
-     - Funding rates for perpetual contracts
-     - Open interest and liquidation levels
+**Internal Signal Generation**
+- AI models analyze processed market data
+- Pattern recognition identifies potential trading opportunities
+- Momentum indicators detect trend strength and potential reversals
+- Support/resistance levels are dynamically calculated
+- Volume analysis confirms price movements
 
-3. **Order Preparation**:
-   - The agent constructs order parameters including:
-     - Symbol/market pair (e.g., SUI-PERP)
-     - Order type (limit, market, stop, etc.)
-     - Direction (buy/sell)
-     - Quantity (in base or quote currency)
-     - Price (for limit orders)
-     - Time in force settings
-     - Stop loss and take profit parameters
+**External Signal Reception**
+- Webhook service (port 5004) receives external trading signals
+- TradingView alerts can trigger predefined strategies
+- Signals are validated against tampering or manipulation
+- Signal quality is assessed based on historical performance
+- Confidence scores are assigned to each received signal
 
-4. **Order Execution**:
-   - Based on market conditions, the agent may use different execution strategies:
-     - Direct market orders for immediate execution
-     - Limit orders at optimized price levels
-     - TWAP (Time-Weighted Average Price) for larger positions
-     - Iceberg orders for minimizing market impact
+### 4. AI-Powered Analysis
 
-5. **Order Confirmation and Verification**:
-   - All orders are logged with unique identifiers
-   - Order status updates are received via websocket connection
-   - Filled orders are verified against expected parameters
-   - Any discrepancies trigger alerts to the monitoring system
+The core of the trading system leverages AI for decision making:
 
-### Position Management
+**Claude AI Integration**
+- Natural language processing of market conditions
+- Context-aware analysis of multiple data sources
+- Pattern recognition across historical similar situations
+- Sentiment analysis of news and social media
+- Anomaly detection for unusual market behavior
 
-1. **Active Position Monitoring**:
-   - Open positions are continuously monitored for:
-     - Price movement relative to entry
-     - Distance to stop loss and take profit levels
-     - Changes in market conditions or volatility
-     - New signals that might contradict current positions
+**Perplexity AI Integration**
+- Research and information synthesis
+- Forecast generation for potential price movement
+- Correlation analysis between assets
+- Market regime identification
+- Risk factor identification
 
-2. **Dynamic Position Adjustment**:
-   - The agent can modify existing positions based on:
-     - Trailing stop adjustments as profit accumulates
-     - Partial take profits at predefined levels
-     - Position size increases/decreases based on conviction changes
-     - Hedging with correlated assets when necessary
+**Multi-Factor Analysis**
+- Technical analysis confirmation (trend direction, momentum)
+- Fundamental analysis where applicable (for certain assets)
+- Market sentiment assessment
+- Volatility analysis and regime detection
+- Liquidity assessment and slippage prediction
 
-3. **Risk Management Enforcement**:
-   - Real-time risk monitoring ensures:
-     - Maximum drawdown limits are not exceeded
-     - Exposure to single assets stays within limits
-     - Portfolio margin requirements are maintained
-     - Liquidation prices remain at safe distances
+### 5. Risk Assessment
 
-4. **Exit Strategy Execution**:
-   - Positions are closed based on:
-     - Stop loss or take profit triggers
-     - Time-based exits for trades exceeding maximum duration
-     - Signal reversal from the AI model
-     - Overall portfolio rebalancing requirements
+Before any trade execution, comprehensive risk analysis occurs:
 
-### Notification and Reporting
+**Position Sizing**
+- Kelly Criterion application for optimal bet sizing
+- Volatility-adjusted position sizes
+- Account balance percentage limitations
+- Dynamic adjustment based on win/loss history
+- Correlation-based portfolio exposure management
 
-1. **Real-time WebSocket Updates**:
-   - All trading activities trigger real-time updates via websocket server
-   - The frontend dashboard displays current positions, orders, and performance metrics
-   - Alerts are pushed for significant events (trade entries, exits, risk thresholds)
+**Risk Metrics Calculation**
+- Value at Risk (VaR) for potential downside exposure
+- Expected shortfall analysis
+- Maximum drawdown projections
+- Liquidation price distance assessment
+- Funding rate impact calculations for perpetual contracts
 
-2. **Performance Tracking**:
-   - Each trade is logged with comprehensive metadata for later analysis
-   - Performance metrics are calculated including:
-     - Win/loss ratio
-     - Average profit/loss
-     - Maximum drawdown
-     - Sharpe and Sortino ratios
-     - Return on investment (ROI)
+**Trade Qualification**
+- Signal strength meets minimum threshold
+- Risk/reward ratio exceeds configured minimum
+- Position doesn't exceed maximum allowed exposure
+- Trade aligns with overall portfolio strategy
+- Market conditions are favorable for strategy
 
-3. **AI Model Feedback Loop**:
-   - Trade outcomes are fed back to the AI system for continuous learning
-   - Pattern recognition improves with each completed trade
-   - Strategy effectiveness is regularly evaluated and adjusted
+### 6. Trade Execution
 
-### Fail-safe Mechanisms
+When a trade decision is made, execution follows a systematic process:
 
-1. **Connection Monitoring**:
-   - Continuous heartbeat checks with Bluefin Exchange
-   - Automatic reconnection with exponential backoff
-   - Fallback servers in case of primary connection failure
+**Order Construction**
+- Order type selection (market, limit, stop, etc.)
+- Price level determination (based on order book analysis)
+- Size calculation based on risk parameters
+- Stop loss and take profit levels established
+- Time-in-force settings configured
 
-2. **Emergency Shutdown**:
-   - Circuit breaker triggers for:
-     - Excessive losses within defined periods
-     - Unusual market volatility
-     - API or system errors exceeding thresholds
-     - Liquidity concerns on the exchange
+**Execution Strategy**
+- Direct market orders for immediate execution needs
+- Limit orders at calculated optimal levels
+- TWAP (Time-Weighted Average Price) for larger positions
+- Iceberg orders to minimize market impact
+- Smart order routing for best execution
 
-3. **Disaster Recovery**:
-   - Regular state snapshots for system recovery
-   - Secure backup of all open positions and orders
-   - Clear procedures for manual intervention
+**Order Submission**
+- Secure API connection to Bluefin Exchange
+- Digital signature generation for transaction security
+- Transaction verification after submission
+- Order status tracking and confirmation
+- Execution details logging
 
-## AI Models and Integrations
+### 7. Position Management
 
-BluefinAIAgentTrader leverages several powerful AI models and integrations:
+Once positions are open, continuous management occurs:
 
-- **Claude by Anthropic**: Powers advanced market analysis and decision-making
-- **Perplexity AI**: Provides research capabilities and market insights
-- **Bluefin Exchange**: Used for cryptocurrency trading through their API
+**Active Monitoring**
+- Real-time price tracking relative to entry
+- Profit/loss calculation and updates
+- Distance to stop loss and take profit tracking
+- Market condition changes that might affect position
+- Funding rate monitoring for perpetual contracts
 
-## Security
+**Dynamic Adjustments**
+- Trailing stop modifications as profit accumulates
+- Partial take-profits at predefined levels
+- Position size adjustments based on evolving market conditions
+- Hedging strategies when necessary
+- Early closure based on AI risk assessment changes
 
-The project incorporates several security measures:
+**Exit Strategy Execution**
+- Stop loss triggers for risk management
+- Take profit execution for realized gains
+- Time-based exits for stagnant positions
+- Signal reversal-based exits
+- Technical level breach exits
 
-- Regular dependency updates to patch vulnerabilities
-- Non-root user execution in Docker containers
-- Read-only file systems for containers where possible
-- Security-focused Docker settings (no-new-privileges, read-only, tmpfs)
-- Volume mount permissions that limit write access
-- Health checks for all services
-- Secure package versions to prevent known vulnerabilities
-- Automated security scanning tools
+### 8. Performance Analysis
 
-### Running Security Checks
+All trading activities are comprehensively analyzed:
 
-You can run security checks on the project using the provided script:
+**Trade Logging**
+- Each trade recorded with complete metadata
+- Entry and exit prices, times, and reasons
+- Position size and duration
+- Associated signals and confidence levels
+- Market conditions during trade
 
-```bash
-./security_checker.sh
-```
+**Performance Metrics**
+- Win/loss ratio calculation
+- Average profit/loss per trade
+- Maximum drawdown measurement
+- Sharpe and Sortino ratios
+- Return on investment (ROI)
 
-This script checks for:
-- Outdated packages
-- Known vulnerabilities in dependencies
-- Exposed secrets or API keys
-- Docker security best practices
-- File permissions
+**AI Feedback Loop**
+- Trading outcomes fed back to AI models
+- Strategy performance tracking by signal type
+- Parameter optimization based on results
+- Pattern recognition improvement
+- Continuous model refinement
 
-## Health Monitoring
+### 9. System Maintenance
 
-The project includes health monitoring features:
+Ongoing system health is ensured through:
 
-```bash
-# Run the health check script directly
-./infrastructure/docker/healthcheck.sh
+**Health Monitoring**
+- Scheduled health checks every 5 minutes via cron
+- Service connectivity verification
+- Resource usage monitoring (CPU, memory, network)
+- Error rate tracking and alerting
+- Automatic recovery attempts for failed services
 
-# View health status from running containers
-docker ps -a
-```
+**Security Updates**
+- Watchtower container provides automatic updates
+- Dependency security scanning
+- Credential rotation schedules
+- Security patch application
+- Vulnerability monitoring
 
-## External Dependencies
+**Performance Optimization**
+- Database cleanup and optimization
+- Log rotation and storage management
+- Cache performance tuning
+- Network latency optimization
+- Resource allocation adjustments
 
-The project relies on several external Git repositories:
+## Monitoring and Logging
 
-- [Bluefin Client Python SUI](https://github.com/fireflyprotocol/bluefin-client-python-sui.git)
-- [Bluefin V2 Client Python](https://github.com/fireflyprotocol/bluefin-v2-client-python.git)
+- Comprehensive logging in `/logs` directory
+- Periodic service health checks
+- WebSocket real-time status updates
+- Automated error reporting
+- Performance metrics storage
+- Trade journal and analytics reports
+- System health dashboards
 
-## Acknowledgements
+## Security Considerations
 
-Special thanks to:
-- Anthropic for the Claude AI model
-- Perplexity AI for research capabilities
-- Bluefin Exchange for their trading API
+- API keys stored in encrypted `.env`
+- Docker containers run with minimal privileges
+- Regular security updates via Watchtower
+- Isolated network configuration
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+1. Fork the repository
+2. Create a feature branch
+3. Commit your changes
+4. Push to the branch
+5. Create a Pull Request
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details. 
+[Insert License Information]
+
+## Support
+
+For issues, feature requests, or contributions, please open a GitHub issue or contact the maintainers.
+
+---
+
+*Developed with ❤️ and AI*
+*Powered by AI and Advanced Trading Strategies* 
