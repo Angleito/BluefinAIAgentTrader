@@ -1,52 +1,73 @@
 # Environment files
 .env
-.envprod
+.env.local
+.env.production
 run_trader_env.sh
 
 # Python
 __pycache__/
 *.py[cod]
 *$py.class
+.venv/
+venv/
+env/
 *.so
 .Python
-env/
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-*.egg-info/
-.installed.cfg
-*.egg
-
-# Virtual Environment
-venv/
-ENV/
-bluefin_env/
 
 # Logs
-logs/
 *.log
+logs/
+.production_pids
+.production_ports
+
+# IDE and Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Docker and Containers
+*.tar
+*.gz
+
+# Backup and temporary files
+backups/
+*.bak
+*.tmp
+
+# Bluefin and API specific
+*.zip
+*example.py
+*test_*.py
+
+# Frontend (if applicable)
+node_modules/
+package-lock.json
+
+# Build and distribution
+dist/
+build/
+*.egg-info/
+
+# Sensitive or local configuration
+infrastructure/docker/.env
+config/.env
+
+# Miscellaneous
+.production_*
+
+# Virtual Environment
+ENV/
+bluefin_env/
 
 # Screenshots and analysis
 screenshots/
 analysis/
-
-# IDE files
-.idea/
-.vscode/
-*.swp
-*.swo
-
-# OS files
-.DS_Store
-Thumbs.db
 
 # Byte-compiled / optimized / DLL files
 *.manifest
@@ -57,9 +78,7 @@ Thumbs.db
 
 # Distribution / packaging
 .Python
-build/
 develop-eggs/
-dist/
 downloads/
 eggs/
 .eggs/
@@ -70,9 +89,6 @@ sdist/
 var/
 wheels/
 share/python-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
 MANIFEST
 
 # PyInstaller
@@ -105,7 +121,6 @@ cover/
 *.pot
 
 # Django stuff:
-*.log
 local_settings.py
 db.sqlite3
 db.sqlite3-journal
@@ -210,5 +225,4 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 
-/browser-use
-node_modules 
+/browser-use 
