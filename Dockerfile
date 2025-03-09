@@ -1,11 +1,19 @@
-# Use Python 3.10 as the base image
-FROM python:3.10-slim
+# syntax=docker/dockerfile:1.4
+# Use Python 3.10 as the base image with BuildX support
+FROM --platform=$TARGETPLATFORM python:3.10-slim
+
+# Set build arguments for multi-arch support
+ARG TARGETPLATFORM
+ARG BUILDPLATFORM
+ARG TARGETOS
+ARG TARGETARCH
 
 # Set working directory
 WORKDIR /app
 
 # Install system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN --mount=type=cache,target=/var/cache/apt \
+    apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     curl \
     git \
@@ -14,16 +22,36 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Flask and Werkzeug with compatible versions first
-RUN pip install --no-cache-dir flask==2.0.1 werkzeug==2.0.3
+# Upgrade pip and install core dependencies
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --upgrade pip && \
+    pip install --no-cache-dir flask==2.0.1 werkzeug==2.0.3
 
-# Copy requirements.txt but exclude Flask and Werkzeug since we've already installed them
+# Copy requirements.txt
 COPY requirements.txt .
 
-# Install other Python dependencies
-RUN grep -v "flask\|werkzeug" requirements.txt > other_requirements.txt && \
-    pip install --no-cache-dir -r other_requirements.txt && \
-    rm other_requirements.txt
+# Install other Python dependencies with build cache and dependency resolution
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --no-cache-dir \
+    anthropic==0.49.0 \
+    gunicorn==20.1.0 \
+    fastapi==0.104.1 \
+    uvicorn==0.23.2 \
+    requests==2.31.0 \
+    backoff==2.2.1 \
+    python-dotenv==0.19.2 \
+    flask-cors==3.0.10 \
+    flask-socketio==5.1.1 \
+    flask-limiter==2.8.1 \
+    python-dateutil==2.8.2 \
+    numpy==1.24.3 \
+    pillow==10.1.0
+
+# Install Bluefin client libraries separately
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --no-cache-dir \
+    git+https://github.com/fireflyprotocol/bluefin-client-python-sui.git \
+    git+https://github.com/fireflyprotocol/bluefin-v2-client-python.git
 
 # Verify Flask and Werkzeug versions
 RUN pip show flask werkzeug
