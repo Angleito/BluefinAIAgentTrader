@@ -1,6 +1,7 @@
 import logging
 import math
 from core.performance_tracker import performance_tracker
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -9,23 +10,28 @@ class RiskManager:
     Manage trading risk and position sizing.
     """
     
-    def __init__(self, account_balance=10000, max_risk_per_trade=0.02, max_open_trades=5, 
-                 max_risk_per_symbol=0.05, max_daily_drawdown=0.05):
+    def __init__(self, account_balance=10000, max_risk_per_trade=None, max_open_trades=5,
+                 max_daily_drawdown=0.05, max_risk_per_symbol=0.1):
         """
-        Initialize the risk manager.
+        Initialize the RiskManager.
         
         Args:
-            account_balance: The initial account balance
-            max_risk_per_trade: Maximum risk per trade as a percentage of account balance
-            max_open_trades: Maximum number of open trades allowed
-            max_risk_per_symbol: Maximum risk per symbol as a percentage of account balance
-            max_daily_drawdown: Maximum daily drawdown allowed as a percentage of account balance
+            account_balance: Total account balance
+            max_risk_per_trade: Maximum risk per trade (defaults to environment variable or 2%)
+            max_open_trades: Maximum number of open trades
+            max_daily_drawdown: Maximum daily drawdown percentage
+            max_risk_per_symbol: Maximum risk allowed per symbol
         """
         self.account_balance = account_balance
-        self.max_risk_per_trade = max_risk_per_trade
+        
+        # Use environment variable or default to 2%
+        self.max_risk_per_trade = max_risk_per_trade or float(os.getenv("DEFAULT_RISK_PERCENTAGE", "0.02"))
+        
         self.max_open_trades = max_open_trades
-        self.max_risk_per_symbol = max_risk_per_symbol
         self.max_daily_drawdown = max_daily_drawdown
+        self.max_risk_per_symbol = max_risk_per_symbol
+        
+        # Initialize tracking variables
         self.daily_pnl = 0
     
     def update_account_balance(self, new_balance):

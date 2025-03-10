@@ -687,61 +687,97 @@ SYMBOL_PARAMS = {
 
 # Add functions for client initialization
 def init_bluefin_client():
-    """Initialize and return a BluefinClient instance based on available implementations"""
-    global BluefinClient, Networks, BLUEFIN_CLIENT_SUI_AVAILABLE, BLUEFIN_V2_CLIENT_AVAILABLE
+    """
+    Initialize the Bluefin client for trading.
     
-    # Set default to Mock for safety
-    client = MockBluefinClient()
+    This function checks for the availability of the Bluefin client libraries
+    and initializes the appropriate client based on environment variables:
     
-    # Use MockNetworks as a fallback
-    if Networks is None:
-        Networks = MockNetworks
+    - For SUI-based client: BLUEFIN_PRIVATE_KEY and BLUEFIN_NETWORK
+    - For API-based client: BLUEFIN_API_KEY and BLUEFIN_API_SECRET
+    
+    If no environment variables are set or there's an error, it falls back to a mock client.
+    
+    Returns:
+        client: The initialized Bluefin client
+    """
+    global client, MOCK_TRADING
     
     try:
-        # First try v2 client
-        if BLUEFIN_CLIENT_SUI_AVAILABLE and BluefinClient is not None:
-            # According to https://bluefin-exchange.readme.io/reference/initialization
-            private_key = os.getenv("BLUEFIN_PRIVATE_KEY")
-            network = os.getenv("BLUEFIN_NETWORK", "testnet").lower()
+        # Check if we should use mock trading
+        mock_trading_env = os.getenv("MOCK_TRADING", "false").lower()
+        MOCK_TRADING = mock_trading_env in ["true", "1", "yes"]
+        
+        if MOCK_TRADING:
+            logger.info("Mock trading enabled, using MockBluefinClient")
+            return MockBluefinClient()
             
-            # Map network string to enum
-            if network == "mainnet":
-                network_enum = Networks.MAINNET
-            elif network == "sui_staging":
-                network_enum = Networks.SUI_STAGING
-            elif network == "sui_prod":
-                network_enum = Networks.SUI_PROD
-            else:
-                network_enum = Networks.TESTNET
-            
-            if private_key:
-                try:
-                    # Initialize client with required parameters
-                    client = BluefinClient(
-                        are_terms_accepted=True,
-                        network=network_enum,
-                        private_key=private_key
-                    )
-                    logger.info(f"Initialized Bluefin client on {network}")
-                    
-                    # Initialize the client asynchronously
-                    # This will be called in the main function
-                    logger.info("Client created, will be initialized in main function")
-                except Exception as e:
-                    logger.error(f"Failed to initialize Bluefin client: {e}")
-                    # Keep the default MockBluefinClient
-            else:
-                logger.warning("Missing Bluefin private key, falling back to mock client")
-                # Keep the default MockBluefinClient
-        else:
-            logger.warning("No Bluefin client available, using mock implementation")
-            # Keep the default MockBluefinClient
+        # Check for SUI-based client
+        if BLUEFIN_CLIENT_SUI_AVAILABLE and os.getenv("BLUEFIN_PRIVATE_KEY"):
+            try:
+                # Get network configuration
+                network_name = os.getenv("BLUEFIN_NETWORK", "SUI_PROD")
+                
+                # Determine network value
+                network_value = None
+                if Networks is not None:
+                    if hasattr(Networks, network_name):
+                        network_value = getattr(Networks, network_name)
+                    elif network_name in ["mainnet", "testnet", "MAINNET", "TESTNET"]:
+                        network_value = getattr(Networks, network_name.upper(), None)
+                
+                if network_value is None:
+                    logger.warning(f"Network {network_name} not found, using SUI_PROD as default")
+                    network_value = Networks.SUI_PROD
+                
+                logger.info(f"Initializing Bluefin SUI client with network: {network_name}")
+                
+                # Initialize the SUI-based client
+                client = BluefinClient(
+                    are_terms_accepted=True,
+                    network=network_value,
+                    private_key=os.getenv("BLUEFIN_PRIVATE_KEY")
+                )
+                
+                # Initialize the client asynchronously
+                asyncio.create_task(client.init(onboard_user=True))
+                
+                logger.info("Bluefin SUI client initialized successfully")
+                return client
+                
+            except Exception as e:
+                logger.error(f"Error initializing Bluefin SUI client: {e}")
+                logger.exception(e)
+                
+        # Check for API-based client
+        if BLUEFIN_V2_CLIENT_AVAILABLE and os.getenv("BLUEFIN_API_KEY") and os.getenv("BLUEFIN_API_SECRET"):
+            try:
+                logger.info("Initializing Bluefin API client")
+                
+                # Initialize the API-based client
+                client = BluefinClient(
+                    api_key=os.getenv("BLUEFIN_API_KEY"),
+                    api_secret=os.getenv("BLUEFIN_API_SECRET"),
+                    use_testnet=os.getenv("BLUEFIN_TESTNET", "false").lower() in ["true", "1", "yes"]
+                )
+                
+                logger.info("Bluefin API client initialized successfully")
+                return client
+                
+            except Exception as e:
+                logger.error(f"Error initializing Bluefin API client: {e}")
+                logger.exception(e)
+        
+        # If no client could be initialized, use mock client
+        logger.warning("No Bluefin client configuration found, using MockBluefinClient")
+        return MockBluefinClient()
+        
     except Exception as e:
-        logger.error(f"Error initializing Bluefin client: {e}")
-        logger.error(traceback.format_exc())
-        # Keep the default MockBluefinClient
-    
-    return client
+        logger.error(f"Error in init_bluefin_client: {e}")
+        logger.exception(e)
+        
+        # Return a mock client as fallback
+        return MockBluefinClient()
 
 def init_claude_client():
     """Initialize the Claude API client using environment variables"""
@@ -1260,77 +1296,38 @@ async def execute_trade(symbol: str, side: str, position_size: float = None, ris
     - price: The price for limit orders (required for LIMIT orders)
     
     It follows the Bluefin order flow:
-    1. Create an order signature request
-    2. Sign the order
-    3. Post the signed order to the exchange
-    4. Place stop loss and take profit orders if specified
+    1. Get the current oracle price from Bluefin API
+    2. Create an order signature request using that price
+    3. Sign the order
+    4. Post the signed order to the exchange
+    5. Calculate and place a stop loss order based on the environment variable
     
     Returns:
         dict: The order response from Bluefin (real or mock)
     """
+    global client
+    
     try:
-        # Initialize Bluefin client if needed
-        global client
-        if client is None:
-            if BLUEFIN_CLIENT_SUI_AVAILABLE:
-                try:
-                    # Try different ways to get the network value
-                    network_value = None
-                    network_name = os.getenv("BLUEFIN_NETWORK", "MAINNET")
-                    
-                    # Check if Networks is defined and has the attribute
-                    if Networks is not None:
-                        if hasattr(Networks, network_name):
-                            network_value = getattr(Networks, network_name)
-                        elif network_name.lower() in ["mainnet", "testnet"]:
-                            network_value = getattr(Networks, network_name.upper(), None)
-                            
-                    if network_value is None:
-                        network_value = Networks.TESTNET  # Default fallback
-                        
-                    logger.info(f"Using network: {network_value}")
-                    client = BluefinClient(private_key=os.getenv("BLUEFIN_PRIVATE_KEY"), network=network_value)
-                except Exception as e:
-                    logger.error(f"Error initializing SUI client: {e}")
-                    client = MockBluefinClient()  # Fallback to mock
-            elif BLUEFIN_V2_CLIENT_AVAILABLE:
-                try:
-                    client = BluefinClient(api_key=os.getenv("BLUEFIN_API_KEY"), api_secret=os.getenv("BLUEFIN_API_SECRET"))
-                except Exception as e:
-                    logger.error(f"Error initializing V2 client: {e}")
-                    client = MockBluefinClient()  # Fallback to mock
-            else:
-                logger.warning("No Bluefin client available, using mock client")
-                client = MockBluefinClient()
+        # Set default values from environment variables if not provided
+        if position_size is None and os.getenv("DEFAULT_POSITION_SIZE_PCT"):
+            position_size = float(os.getenv("DEFAULT_POSITION_SIZE_PCT", 0.05))
         
-        # Check for existing positions in the opposite direction
-        try:
-            positions = []
-            if hasattr(client, "get_positions"):
-                positions = await client.get_positions()
-            elif hasattr(client, "get_account_info"):
-                account_info = await client.get_account_info()
-                positions = account_info.get("positions", [])
+        if risk_percentage is None:
+            risk_percentage = float(os.getenv("DEFAULT_RISK_PERCENTAGE", 0.02))
+        
+        if stop_loss_percentage is None:
+            stop_loss_percentage = float(os.getenv("DEFAULT_STOP_LOSS_PERCENTAGE", 0.05))
+        
+        if take_profit_percentage is None and os.getenv("DEFAULT_TAKE_PROFIT_PCT"):
+            take_profit_percentage = float(os.getenv("DEFAULT_TAKE_PROFIT_PCT", 0.3))
+        
+        if leverage is None and os.getenv("DEFAULT_LEVERAGE"):
+            leverage = int(os.getenv("DEFAULT_LEVERAGE", 5))
             
-            # Find position for the current symbol
-            existing_position = next((p for p in positions if p.get("symbol") == symbol), None)
-            
-            # If there's an existing position, check if it's in the opposite direction
-            if existing_position:
-                existing_side = existing_position.get("side", "").upper()
-                new_side = "LONG" if side == ORDER_SIDE.BUY else "SHORT"
-                
-                if existing_side != new_side:
-                    # Position is in the opposite direction, double the size
-                    existing_quantity = float(existing_position.get("quantity", 0))
-                    logger.info(f"Found existing {existing_side} position with size {existing_quantity}, doubling new position size")
-                    
-                    # If position_size is not provided or smaller than existing position, double the existing position size
-                    if position_size is None or position_size < existing_quantity:
-                        position_size = existing_quantity * 2
-                        logger.info(f"Adjusted position size to {position_size} to close existing position and open new one")
-        except Exception as e:
-            logger.warning(f"Error checking existing positions: {e}. Proceeding with original position size.")
+        # Check if client is initialized
+        if client is None:
+            logger.error("Trade client not initialized")
+            return None
         
         # Calculate position size if not provided
         if position_size is None:
@@ -1349,14 +1346,15 @@ async def execute_trade(symbol: str, side: str, position_size: float = None, ris
         # Ensure leverage is set correctly
         await ensure_leverage(symbol, leverage_value)
         
-        # Get current market price for stop loss and take profit calculations
+        # Get current market price from Bluefin exchange API
+        logger.info(f"Getting current market price for {symbol} from Bluefin exchange")
         market_price = await get_market_price(symbol)
+        logger.info(f"Current market price for {symbol}: {market_price}")
         
-        # For LIMIT orders, ensure price is provided
+        # For LIMIT orders, use the current market price if none provided
         if order_type == "LIMIT" and price is None:
-            # Use market price as a fallback
             price = market_price
-            logger.warning(f"No price provided for LIMIT order, using market price: {price}")
+            logger.info(f"Setting limit price to current market price: {price}")
         
         # Create order using the signature flow
         try:
@@ -1392,12 +1390,13 @@ async def execute_trade(symbol: str, side: str, position_size: float = None, ris
                 )
                 logger.info(f"Placed order directly, response: {main_order}")
             
-            # Place stop loss order if percentage is provided
+            # Place stop loss order using STOP_MARKET type
             if stop_loss_percentage and stop_loss_percentage > 0 and main_order:
                 try:
-                    # Calculate stop loss price based on entry price and direction
-                    entry_price = price or market_price
+                    # Use the actual execution price or market price to calculate stop loss
+                    entry_price = main_order.get("price") if main_order.get("price") else market_price
                     
+                    # Calculate stop loss price based on entry price and direction
                     if side == ORDER_SIDE.BUY:
                         # For long positions, stop loss is below entry price
                         stop_price = entry_price * (1 - stop_loss_percentage)
@@ -1442,8 +1441,8 @@ async def execute_trade(symbol: str, side: str, position_size: float = None, ris
             # Place take profit order if percentage is provided
             if take_profit_percentage and take_profit_percentage > 0 and main_order:
                 try:
-                    # Calculate take profit price based on entry price and direction
-                    entry_price = price or market_price
+                    # Use the actual execution price or market price to calculate take profit
+                    entry_price = main_order.get("price") if main_order.get("price") else market_price
                     
                     if side == ORDER_SIDE.BUY:
                         # For long positions, take profit is above entry price
@@ -2090,7 +2089,10 @@ async def calculate_position_size(symbol, side, risk_percentage=None, stop_loss_
 
 async def get_market_price(symbol):
     """
-    Get the current market price for a symbol.
+    Get the current market price for a symbol from Bluefin Exchange.
+    
+    This function first tries to use the BluefinMarket utility, then falls back
+    to direct API calls, and finally to default values if all else fails.
     
     Args:
         symbol (str): The trading symbol (e.g., 'BTC-PERP')
@@ -2101,22 +2103,59 @@ async def get_market_price(symbol):
     global client
     
     try:
-        # Try to get market price from Bluefin client
-        if hasattr(client, 'get_market_price'):
-            price = await client.get_market_price(symbol)
-            logger.info(f"Got market price for {symbol}: {price}")
-            return price
+        # First try using BluefinMarket utility if available
+        try:
+            from core.bluefin_market import get_price
+            price = await get_price(symbol)
+            if price is not None:
+                logger.info(f"Got market price from BluefinMarket utility for {symbol}: {price}")
+                return price
+        except ImportError:
+            # BluefinMarket utility not available, falling back to direct methods
+            logger.debug("BluefinMarket utility not available, using fallback methods")
+        
+        # Normalize symbol format (Bluefin API may require a specific format)
+        if "-PERP" not in symbol and "/" in symbol:
+            api_symbol = symbol.replace("/", "-") + "-PERP"
+        else:
+            api_symbol = symbol
+            
+        logger.info(f"Getting market price for {api_symbol}")
+        
+        # Try to get market price directly from Bluefin API
+        if client and hasattr(client, '_request'):
+            try:
+                # Try to get exchange info for the symbol
+                response = await client._request("GET", f"/marketData?symbol={api_symbol}")
+                if response and isinstance(response, dict) and "marketPrice" in response:
+                    price = float(response["marketPrice"]) / 1e18
+                    logger.info(f"Got oracle price from Bluefin API for {api_symbol}: {price}")
+                    return price
+            except Exception as e:
+                logger.warning(f"Error getting price from Bluefin API: {e}")
+        
+        # Try to get market price using client's method
+        if client and hasattr(client, 'get_market_price'):
+            try:
+                price = await client.get_market_price(api_symbol)
+                logger.info(f"Got market price using client for {api_symbol}: {price}")
+                return float(price)
+            except Exception as e:
+                logger.warning(f"Error getting price using client's get_market_price: {e}")
         
         # Try to get orderbook and use mid price
-        if hasattr(client, 'get_orderbook'):
-            orderbook = await client.get_orderbook(symbol)
-            if orderbook and 'bids' in orderbook and 'asks' in orderbook:
-                if orderbook['bids'] and orderbook['asks']:
-                    bid = float(orderbook['bids'][0][0])
-                    ask = float(orderbook['asks'][0][0])
-                    mid_price = (bid + ask) / 2
-                    logger.info(f"Calculated mid price for {symbol}: {mid_price}")
-                    return mid_price
+        if client and hasattr(client, 'get_orderbook'):
+            try:
+                orderbook = await client.get_orderbook(api_symbol)
+                if orderbook and 'bids' in orderbook and 'asks' in orderbook:
+                    if orderbook['bids'] and orderbook['asks']:
+                        bid = float(orderbook['bids'][0][0])
+                        ask = float(orderbook['asks'][0][0])
+                        mid_price = (bid + ask) / 2
+                        logger.info(f"Calculated mid price for {api_symbol}: {mid_price}")
+                        return mid_price
+            except Exception as e:
+                logger.warning(f"Error getting orderbook: {e}")
         
         # Fallback to default prices for common symbols
         default_prices = {

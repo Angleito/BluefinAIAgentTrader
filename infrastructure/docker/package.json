@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "@api/bluefin-exchange": "file:.api/apis/bluefin-exchange"
+  }
+}
