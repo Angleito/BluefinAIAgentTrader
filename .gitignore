@@ -245,3 +245,19 @@ browser-use/
 .dockerignore
 security_checker.sh
 
+# SSH and key files that should never be committed
+decode_ssh_key.py
+*key
+*key.pub
+*bruh
+*bruh.pub
+*yeet
+*yeet.pub
+*"*eval \"$(ssh-agent -s)\""*
+*"*eval \"$(ssh-agent -s)\".pub"*
+*.ssh/
+*id_rsa*
+*id_dsa*
+*id_ed25519*
+*.pem
+
